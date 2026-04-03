@@ -2,7 +2,7 @@
 
 ## Branch: `claude/shadow-accord-rpg-kkEVH`
 
-## Project Status: Phase 1 In Progress
+## Project Status: Phase 1-3 COMPLETE, Phase 4 Remaining
 
 ### What's Been Built
 - **Next.js 14 project** scaffolded with TypeScript, Tailwind, App Router
@@ -25,57 +25,28 @@
 - `ActionPanel.tsx` - Left sidebar with 10 strategic actions and sub-panels (move/attack/build/research/recruit/espionage/trade/rest)
 - `DiplomacyScreen.tsx` - Relationship web (SVG hexagonal layout), faction dossiers, diplomatic actions
 
-### CRITICAL: What Needs To Be Done
+### COMPLETED
+- Store fully rewritten (556 lines) with all game logic
+- Territories stored as `Record<string, Territory>` 
+- All strategic actions: moveForces, attackTerritory, buildStructure, startResearch, recruitOperative, handleDiplomacy, restRefit
+- Full endTurn: income, AI turns, research, events, treaty timers, healing, autosave
+- Tactical combat: startTacticalCombat, moveUnit, attackUnit, endPlayerTurn (with enemy AI), endCombat
+- All components built: TacticalGrid, MissionBriefing, TechTreeScreen, RosterScreen, EventModal, GameOverScreen, IntelPanel, BottomBar
+- page.tsx renders GameLayout, layout.tsx has dark theme
+- Build succeeds with zero errors
 
-#### 1. REWRITE THE STORE (`src/store/gameStore.ts`)
-The current store is only 205 lines and is a skeleton. It needs:
-
-**Territory handling**: Store uses `territories` as an array but WorldMap accesses it as both array (`Object.values()`) and Record (`territories[adjId]`). **Decision needed**: Use `Record<string, Territory>` (more natural for lookups). Update WorldMap's `territoryList = useMemo(() => Object.values(territories))` pattern works fine with Record.
-
-**The `TERRITORIES` import is broken**: Store imports `TERRITORIES` from territories.ts but the main export is `createTerritories()`. I added a `TERRITORIES` export of raw defs but the store needs to call `createTerritories()` to get proper Territory objects.
-
-**Missing store actions that components already reference**:
-- `actionsRemaining` (number, starts at 5 per turn) - TopBar and ActionPanel read this via `getState()`
-- `handleDiplomacy(action, targetFaction)` - DiplomacyScreen calls this
-- `endTurn()` - ActionPanel's End Turn button needs this
-- `moveForces(from, to, count)` 
-- `attackTerritory(from, to)` - should trigger tactical combat or auto-resolve
-- `buildStructure(territory, buildingType)`
-- `startResearch(techId)`
-- `recruitOperative(class)`
-- `restRefit()`
-- `spies` array in state - ActionPanel reads this
-
-**Full store needs these slices**:
-- **Turn system**: `actionsRemaining`, `endTurn()` that processes AI turns, income, research progress, events, autosave
-- **Combat**: `startCombat(mission)`, `startTacticalCombat()`, `moveUnit()`, `attackUnit()`, `useAbility()`, `endPlayerTurn()`, `endCombat()`
-- **Diplomacy**: `handleDiplomacy()`, relation updates, treaty management
-- **AI**: `processAITurns()` - each AI faction takes actions based on personality
-- **Economy**: `processIncome()` at end of turn
-- **Events**: `triggerEvent()`, `resolveEvent(choiceId)` 
-- **Espionage**: spy deployment and resolution
-
-#### 2. Missing Components (referenced in GameLayout.tsx)
-- `src/components/ui/IntelPanel.tsx` - Right sidebar showing intel reports and event log
-- `src/components/ui/BottomBar.tsx` - News ticker with AI faction action summaries
-- `src/components/combat/TacticalGrid.tsx` - XCOM-style grid combat (THE BIG ONE)
-- `src/components/combat/MissionBriefing.tsx` - Pre-combat briefing screen
-- `src/components/screens/TechTreeScreen.tsx` - Horizontal branching tech tree
-- `src/components/screens/RosterScreen.tsx` - Operative roster with stats, memorial wall
-- `src/components/screens/EventModal.tsx` - Full-screen event display with choices
-- `src/components/screens/GameOverScreen.tsx` - Victory/defeat screen
-
-#### 3. Fix page.tsx
-`src/app/page.tsx` still has the default Next.js template. Replace with:
-```tsx
-import GameLayout from '@/components/GameLayout';
-export default function Home() {
-  return <GameLayout />;
-}
-```
-
-#### 4. Fix layout.tsx
-May need to update `src/app/layout.tsx` to set dark background and import fonts.
+### What Could Still Be Improved (Phase 4 Polish)
+- Operative abilities in tactical combat (currently only basic move/attack)
+- Espionage system (spy deployment/actions screen)
+- More sophisticated AI (currently random; should use personality traits)
+- Sound effects and music
+- Tutorial/first-turn guidance
+- Operative bond system
+- Mission type variety (currently only 'assault')
+- More map templates for tactical combat
+- Trade route system
+- Ironman mode enforcement
+- Victory condition checks beyond territory count
 
 ### Architecture Notes
 - **State**: All game state in Zustand store with localStorage persistence
