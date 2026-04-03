@@ -25,11 +25,7 @@ export default function TopBar() {
   const resources = playerData?.resources;
   const accentColor = playerFaction ? FACTION_COLORS[playerFaction] : '#6B7280';
 
-  // Pull actionsRemaining from store (may not exist yet — default to 5)
-  const actionsRemaining =
-    (useGameStore.getState() as Record<string, unknown>).actionsRemaining as
-      | number
-      | undefined ?? 5;
+  const actionsRemaining = useGameStore((s) => s.actionsRemaining) ?? 5;
 
   // Close menu on outside click
   useEffect(() => {

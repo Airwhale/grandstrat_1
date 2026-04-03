@@ -99,10 +99,8 @@ export default function ActionPanel() {
     selectedTerritory,
   } = useGameStore();
 
-  const storeAny = useGameStore.getState() as Record<string, unknown>;
-  const actionsRemaining = (storeAny.actionsRemaining as number | undefined) ?? 5;
-  const researchedTechs = (storeAny.researchedTechs as string[] | undefined) ??
-    (playerFaction ? factions[playerFaction]?.researchedTechs ?? [] : []);
+  const actionsRemaining = useGameStore((s) => s.actionsRemaining) ?? 5;
+  const researchedTechs = playerFaction ? factions[playerFaction]?.researchedTechs ?? [] : [];
 
   const accentColor = playerFaction ? FACTION_COLORS[playerFaction] : '#6B7280';
 
@@ -113,10 +111,12 @@ export default function ActionPanel() {
   const [troopCount, setTroopCount] = useState(1);
   const [endTurnConfirm, setEndTurnConfirm] = useState(false);
 
-  // Derived data
+  // Derived data - territories is Record<string, Territory>
+  const territoryList = useMemo(() => Object.values(territories), [territories]);
+
   const ownedTerritories = useMemo(
-    () => territories.filter((t) => t.controller === playerFaction),
-    [territories, playerFaction],
+    () => territoryList.filter((t) => t.controller === playerFaction),
+    [territoryList, playerFaction],
   );
 
   const woundedOperatives = useMemo(
@@ -130,13 +130,13 @@ export default function ActionPanel() {
   );
 
   const sourceTerritoryData = useMemo(
-    () => (sourceTerritory ? territories.find((t) => t.id === sourceTerritory) : null),
+    () => (sourceTerritory ? territories[sourceTerritory] ?? null : null),
     [sourceTerritory, territories],
   );
 
   const adjacentTargets = useMemo(() => {
     if (!sourceTerritoryData) return [];
-    return territories.filter((t) => sourceTerritoryData.adjacency.includes(t.id));
+    return sourceTerritoryData.adjacency.map((id) => territories[id]).filter(Boolean) as Territory[];
   }, [sourceTerritoryData, territories]);
 
   // Handlers
@@ -293,7 +293,10 @@ export default function ActionPanel() {
             </div>
             <button
               onClick={() => {
-                // TODO: dispatch moveForces action
+                const s = useGameStore.getState() as any;
+                if (s.moveForces && sourceTerritory && selectedTerritory) {
+                  s.moveForces(sourceTerritory, selectedTerritory, troopCount);
+                }
                 resetMode();
               }}
               className="w-full text-xs py-1.5 rounded font-semibold transition-colors"
@@ -313,7 +316,10 @@ export default function ActionPanel() {
                 <button
                   key={b.type}
                   onClick={() => {
-                    // TODO: dispatch build action
+                    const s = useGameStore.getState() as any;
+                    if (s.buildStructure && sourceTerritory) {
+                      s.buildStructure(sourceTerritory, b.type);
+                    }
                     resetMode();
                   }}
                   className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-800 transition-colors text-gray-300 flex justify-between items-center"
@@ -337,7 +343,8 @@ export default function ActionPanel() {
                 <button
                   key={tech.id}
                   onClick={() => {
-                    // TODO: dispatch research action
+                    const s = useGameStore.getState() as any;
+                    if (s.startResearch) s.startResearch(tech.id);
                     resetMode();
                   }}
                   className="w-full text-left text-xs px-2 py-2 rounded hover:bg-gray-800 transition-colors text-gray-300"
@@ -379,7 +386,8 @@ export default function ActionPanel() {
                 <button
                   key={rc.cls}
                   onClick={() => {
-                    // TODO: dispatch recruit action
+                    const s = useGameStore.getState() as any;
+                    if (s.recruitOperative) s.recruitOperative(rc.cls);
                     resetMode();
                   }}
                   className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-800 transition-colors text-gray-300 flex items-center gap-2"
@@ -398,8 +406,8 @@ export default function ActionPanel() {
             <p className="text-[11px] text-gray-400 mb-2">Spy deployment:</p>
             <div className="space-y-1">
               {(() => {
-                const spies = (storeAny.spies as Array<{ id: string; name: string; location: string | null; isCompromised: boolean }>) ?? [];
-                const factionSpies = spies.filter((s) => (s as Record<string, unknown>).faction === playerFaction);
+                const spies = useGameStore.getState().spies ?? [];
+                const factionSpies = spies.filter((s) => s.faction === playerFaction);
                 if (factionSpies.length === 0) {
                   return <p className="text-[10px] text-gray-600 italic">No spies available. Build a Spy Network first.</p>;
                 }
@@ -407,7 +415,7 @@ export default function ActionPanel() {
                   <button
                     key={spy.id}
                     onClick={() => {
-                      // TODO: dispatch spy action
+                      // Spy actions handled through espionage screen (future)
                       resetMode();
                     }}
                     className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-800 transition-colors text-gray-300 flex justify-between"
@@ -441,7 +449,8 @@ export default function ActionPanel() {
             )}
             <button
               onClick={() => {
-                // TODO: dispatch restRefit action
+                const s = useGameStore.getState() as any;
+                if (s.restRefit) s.restRefit();
                 resetMode();
               }}
               disabled={woundedOperatives.length === 0}
@@ -463,7 +472,12 @@ export default function ActionPanel() {
             </p>
             <button
               onClick={() => {
-                // TODO: dispatch the corresponding action
+                const s = useGameStore.getState() as any;
+                if (activeMode === 'attack' && s.attackTerritory && sourceTerritory && selectedTerritory) {
+                  s.attackTerritory(sourceTerritory, selectedTerritory);
+                } else if (activeMode === 'covertOp' && s.startTacticalCombat && sourceTerritory && selectedTerritory) {
+                  s.startTacticalCombat(sourceTerritory, selectedTerritory);
+                }
                 resetMode();
               }}
               className="w-full text-xs py-1.5 rounded font-semibold transition-colors"
@@ -552,7 +566,8 @@ export default function ActionPanel() {
             <div className="flex gap-2">
               <button
                 onClick={() => {
-                  // TODO: dispatch endTurn action
+                  const s = useGameStore.getState() as any;
+                  if (s.endTurn) s.endTurn();
                   setEndTurnConfirm(false);
                 }}
                 className="flex-1 py-2 rounded text-xs font-bold uppercase bg-red-600 text-white hover:bg-red-500 transition-colors"
