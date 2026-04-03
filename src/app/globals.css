@@ -1,0 +1,170 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #080c14;
+  --foreground: #e2e8f0;
+  --surface: #111827;
+  --border: #1e293b;
+  --text-secondary: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Monospace for data */
+.font-mono {
+  font-family: 'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Heading font */
+.font-heading {
+  font-family: 'Bebas Neue', 'Archivo Black', Impact, sans-serif;
+  letter-spacing: 0.05em;
+}
+
+/* Scanline effect */
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+.scanline-effect::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.08), transparent);
+  animation: scanline 4s linear infinite;
+  pointer-events: none;
+}
+
+/* Pulse glow */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Dash scroll for supply lines */
+@keyframes dash-scroll {
+  0% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -20; }
+}
+
+.animate-dash {
+  animation: dash-scroll 1s linear infinite;
+}
+
+/* News ticker */
+@keyframes ticker-scroll {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+.animate-ticker {
+  animation: ticker-scroll 30s linear infinite;
+}
+
+/* Corner reticle decoration */
+.reticle-corners::before,
+.reticle-corners::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-color: currentColor;
+  border-style: solid;
+  border-width: 0;
+  opacity: 0.5;
+}
+
+.reticle-corners::before {
+  top: 0;
+  left: 0;
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+
+.reticle-corners::after {
+  bottom: 0;
+  right: 0;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+}
+
+/* Grid background pattern */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0f1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* HP bar colors */
+.hp-high { background: #22c55e; }
+.hp-mid { background: #f59e0b; }
+.hp-low { background: #ef4444; }
+
+/* Classified stamp */
+.classified-stamp {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-25deg);
+  font-size: 4rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  opacity: 0.06;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Combat grid tile hover */
+.tile-hover:hover {
+  filter: brightness(1.3);
+  cursor: pointer;
+}
+
+/* Suppress body scroll */
+body {
+  overscroll-behavior: none;
+}
