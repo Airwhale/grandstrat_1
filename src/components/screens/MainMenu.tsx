@@ -189,62 +189,6 @@ export default function MainMenu() {
         }}
       />
 
-      <style>{`
-        @keyframes mainmenu-scanlines {
-          0% { background-position: 0 0; }
-          100% { background-position: 0 100vh; }
-        }
-        @keyframes mainmenu-scanbar {
-          0%, 100% { background-position: 0 -100%; }
-          50% { background-position: 0 200%; }
-        }
-        @keyframes mainmenu-float {
-          0%, 100% { transform: translateY(0px) translateX(0px); opacity: 0.3; }
-          25% { transform: translateY(-30px) translateX(10px); opacity: 0.6; }
-          50% { transform: translateY(-10px) translateX(-10px); opacity: 0.2; }
-          75% { transform: translateY(-40px) translateX(5px); opacity: 0.5; }
-        }
-        .mainmenu-particles::before,
-        .mainmenu-particles::after {
-          content: '';
-          position: absolute;
-          width: 2px;
-          height: 2px;
-          border-radius: 50%;
-          background: rgba(59,130,246,0.4);
-        }
-        .mainmenu-particles::before {
-          top: 30%;
-          left: 20%;
-          box-shadow:
-            40vw 10vh 0 0 rgba(59,130,246,0.2),
-            60vw 30vh 0 0 rgba(139,92,246,0.2),
-            20vw 60vh 0 0 rgba(16,185,129,0.15),
-            80vw 20vh 0 0 rgba(245,158,11,0.15),
-            50vw 70vh 0 0 rgba(239,68,68,0.15),
-            10vw 80vh 0 0 rgba(249,115,22,0.15),
-            70vw 50vh 0 0 rgba(59,130,246,0.2),
-            30vw 40vh 0 0 rgba(139,92,246,0.15);
-          animation: mainmenu-float 12s ease-in-out infinite;
-        }
-        .mainmenu-particles::after {
-          top: 50%;
-          left: 60%;
-          box-shadow:
-            -30vw -20vh 0 0 rgba(59,130,246,0.15),
-            10vw -10vh 0 0 rgba(139,92,246,0.2),
-            -20vw 20vh 0 0 rgba(16,185,129,0.2),
-            30vw -30vh 0 0 rgba(245,158,11,0.15),
-            -10vw 30vh 0 0 rgba(239,68,68,0.2),
-            20vw 10vh 0 0 rgba(249,115,22,0.2);
-          animation: mainmenu-float 15s ease-in-out infinite reverse;
-        }
-        @keyframes mainmenu-pulse-line {
-          0%, 100% { opacity: 0.05; transform: scaleX(0.8); }
-          50% { opacity: 0.15; transform: scaleX(1); }
-        }
-      `}</style>
-
       {/* Content */}
       <div className="relative z-20 flex flex-col items-center px-6">
         {/* Decorative line above title */}

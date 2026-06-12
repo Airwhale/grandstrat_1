@@ -338,13 +338,6 @@ export default function FactionSelect() {
         }}
       />
 
-      <style>{`
-        @keyframes scanlines {
-          0% { background-position: 0 0; }
-          100% { background-position: 0 100vh; }
-        }
-      `}</style>
-
       {/* Content */}
       <div className="relative z-20 w-full max-w-6xl px-6 py-10 flex flex-col items-center min-h-screen">
         {/* Back to menu */}
