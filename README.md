@@ -1,36 +1,100 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OPERATION: SHADOW ACCORD
 
-## Getting Started
+A geopolitical grand strategy RPG with XCOM-style tactical combat, diplomacy, and permadeath. Set in 2034, after cascading economic collapses splintered the world into six rival power blocs waging a covert shadow war.
 
-First, run the development server:
+Built with Next.js 14, TypeScript, Tailwind CSS, Framer Motion, and Zustand. Fully client-side — saves live in your browser's localStorage.
+
+## Running the Game
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). Best on a desktop screen (1280px+).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How to Play
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Goal
 
-## Learn More
+- **Win** by controlling **30 of 46 territories** (progress shown in the top bar).
+- **Lose** if you run out of territories — or out of operatives.
 
-To learn more about Next.js, take a look at the following resources:
+### Pick a Faction
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Each of the six factions has distinct strengths, starting resources, and a unique operative class:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Faction | Style | Difficulty |
+|---|---|---|
+| Atlantic Compact | Tech & intelligence | ★★ |
+| Eastern Pact | Military might | ★★★ |
+| Jade Circle | Economy (everyone starts -10 relations with you) | ★★ |
+| Solar League | Population & influence | ★★★ |
+| Southern Axis | Rare materials & resilience | ★★★★ |
+| Free Cities | Espionage & finance, tiny military | ★★★★★ |
 
-## Deploy on Vercel
+### The Strategic Turn
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Each turn is one month. You get **5 actions** per turn from the left panel:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Move Forces** — reposition troops between adjacent territories you own.
+- **Attack** — quick auto-resolved assault on an adjacent territory. Driven by troop counts, fortification, and luck.
+- **Covert Op** — deploy your named operatives into tactical grid combat. Higher reward than auto-resolve, but operatives can die. *Permanently.*
+- **Build** — buildings cost 90–200 credits. Banks and factories raise income, labs raise research output, hospitals speed healing.
+- **Research** — spend tech points across military / economic / intelligence branches (view the tree via **TECH** in the top bar).
+- **Recruit** — a new operative costs 50 credits + 10 manpower.
+- **Espionage** — send a spy to gather intel, sabotage a garrison, or incite unrest. Captured spies damage diplomatic relations.
+- **Diplomacy** — propose treaties (trade 5 ⚡, non-aggression 10, alliances 20–35 influence). The relationship web shows who hates whom.
+- **Rest & Refit** — accelerate healing for wounded operatives.
+
+Press **END TURN** and the world moves: income arrives, AI factions maneuver and attack (watch the news ticker), research ticks forward, and every third turn a global event demands a decision.
+
+### Tactical Combat
+
+Covert Ops drop your **5 best active operatives** onto a terrain-based grid (urban, jungle, desert, arctic, mountain, coastal):
+
+- Each unit gets **2 action points**: move, attack, **Overwatch** (reaction fire), or **Hunker** (double cover).
+- Attack mode shows a **hit % badge** over each target — hover for the full breakdown (aim, range, cover, flanking, high ground).
+- Half cover: -20% to be hit. Full cover: -40%. Flanking negates cover and adds crit chance.
+- **Blue units are yours. Red are hostile.**
+- An operative at 0 HP is **KIA — gone forever**, their name added to the memorial wall (top bar → **ROSTER**).
+- Survivors earn XP, level up, and get wounded (1–3 turns out) if they took damage.
+
+### Resources
+
+| | Resource | Source | Spent on |
+|---|---|---|---|
+| 🪙 | Credits | territories, banks, factories | everything |
+| 🧪 | Tech Points | labs | research |
+| 🎭 | Influence | media centers | diplomacy |
+| ⚙️ | Rare Materials | special territories (gold dot) | elite gear |
+| 👥 | Manpower | population | recruiting |
+
+### Saving
+
+Three manual slots plus an autosave every turn (hamburger menu, top right). **Ironman** difficulty means one save, no take-backs.
+
+In-game, click the **?** button in the top bar for the field manual.
+
+## Project Structure
+
+```
+src/
+├── app/            # Next.js app router pages
+├── components/
+│   ├── combat/     # MissionBriefing, TacticalGrid
+│   ├── map/        # WorldMap (strategic layer)
+│   ├── screens/    # MainMenu, FactionSelect, Diplomacy, TechTree, Roster, Events, GameOver
+│   └── ui/         # TopBar, ActionPanel, IntelPanel, BottomBar, HelpModal
+├── data/           # factions, territories, technologies, operatives, events, combat maps
+├── store/          # Zustand game store + combat/economy/AI helpers
+└── types/          # All TypeScript definitions
+```
+
+## Dev Scripts
+
+```bash
+npm run dev          # dev server
+npm run build        # production build
+node scripts/playtest.cjs   # automated browser playtest (needs dev server running)
+```

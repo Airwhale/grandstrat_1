@@ -39,7 +39,6 @@ export default function MissionBriefing() {
   const mission = useGameStore((s) => s.mission);
   const tacticalUnits = useGameStore((s) => s.tacticalUnits);
   const playerFaction = useGameStore((s) => s.playerFaction);
-  const setPhase = useGameStore((s) => s.setPhase);
 
   if (!mission) return null;
 
@@ -48,17 +47,11 @@ export default function MissionBriefing() {
   const enemyCount = mission.enemyCount;
 
   const handleDeploy = () => {
-    setPhase('tactical');
+    useGameStore.getState().deployMission();
   };
 
   const handleAutoResolve = () => {
-    const store = useGameStore.getState() as any;
-    // Simple auto-resolve: player wins if they have more or equal units
-    const result = playerUnits.length >= enemyCount ? 'victory' : 'defeat';
-    if (store.endCombat) {
-      store.endCombat(result);
-    }
-    setPhase('strategic');
+    useGameStore.getState().autoResolveMission();
   };
 
   return (

@@ -16,6 +16,7 @@ import type {
   IntelReport,
   SaveSlot,
   Spy,
+  SpyAction,
   BuildingType,
   OperativeClass,
   DiplomaticAction,
@@ -75,10 +76,13 @@ export interface GameState {
   restRefit: () => void;
   resolveEvent: (choiceId: string) => void;
   startTacticalCombat: (fromId: string, toId: string) => void;
+  deployMission: () => void;
+  autoResolveMission: () => void;
   moveUnit: (unitId: string, x: number, y: number) => void;
   attackUnit: (attackerId: string, targetId: string) => void;
   endPlayerTurn: () => void;
   endCombat: (result: string) => void;
+  deploySpy: (spyId: string, territoryId: string, action: SpyAction) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,13 +439,40 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   // ---- Tactical Combat ----
   startTacticalCombat: (fromId, toId) => {
-    const { territories, playerFaction } = get();
+    const { territories, playerFaction, operatives, newsTicker } = get();
     if (!playerFaction) return;
     const from = territories[fromId], to = territories[toId];
     if (!from || !to) return;
-    const { grid, units, mission } = setupTacticalCombat(to.terrain, playerFaction, from.troops, to.troops);
-    const m = { ...mission, territoryId: toId };
+    const { grid, units, mission } = setupTacticalCombat(to.terrain, playerFaction, operatives, to.troops);
+    if (!units.some(u => u.isPlayer)) {
+      set({ newsTicker: [...newsTicker, 'No active operatives available for deployment. Recruit or heal your roster.'] });
+      return;
+    }
+    const m = { ...mission, territoryId: toId, deployed: false };
     set({ grid, tacticalUnits: units, mission: m, phase: 'tactical', combatLog: [] });
+  },
+
+  deployMission: () => {
+    const { mission } = get();
+    if (!mission) return;
+    set({ mission: { ...mission, deployed: true } });
+  },
+
+  autoResolveMission: () => {
+    const { mission, tacticalUnits } = get();
+    if (!mission) return;
+    // Strength contest with variance; manual play is better on average
+    const playerStr = tacticalUnits.filter(u => u.isPlayer).reduce((s, u) => s + u.hp + u.aim / 5, 0);
+    const enemyStr = tacticalUnits.filter(u => !u.isPlayer).reduce((s, u) => s + u.hp, 0) * 1.2;
+    const victory = playerStr * (0.7 + Math.random() * 0.6) > enemyStr;
+    // Units take random damage; defeat is bloodier
+    const damaged = tacticalUnits.map(u => {
+      if (!u.isPlayer) return { ...u, hp: victory ? 0 : u.hp };
+      const dmgFrac = victory ? Math.random() * 0.6 : 0.3 + Math.random() * 0.7;
+      return { ...u, hp: Math.max(0, Math.round(u.hp - u.maxHp * dmgFrac)) };
+    });
+    set({ tacticalUnits: damaged, mission: { ...mission, isComplete: true, result: victory ? 'victory' : 'defeat' } });
+    get().endCombat(victory ? 'victory' : 'defeat');
   },
 
   moveUnit: (unitId, x, y) => {
@@ -479,6 +510,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
       if (hitTarget.hp <= 0) {
         newLog.push({ turn: mission.currentTurn, message: `${target.name} eliminated!`, type: 'kill' });
+        if (attacker.isPlayer) {
+          updatedUnits = updatedUnits.map(u => u.id === attackerId ? { ...u, kills: (u.kills ?? 0) + 1 } : u);
+        }
       }
     } else {
       // Graze check (25% of misses)
@@ -531,12 +565,60 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   endCombat: (result) => {
-    const { mission, territories, factions, playerFaction, newsTicker } = get();
+    const { mission, territories, factions, playerFaction, newsTicker, tacticalUnits, operatives, fallenOperatives, turn } = get();
     if (!mission || !playerFaction) { set({ phase: 'strategic', mission: null, grid: [], tacticalUnits: [], combatLog: [] }); return; }
     const tid = mission.territoryId;
     const updatedTerritories = { ...territories };
     const updatedFactions = { ...factions };
     const ticker = [...newsTicker];
+
+    // ---- Apply consequences to the deployed roster: permadeath, wounds, XP ----
+    const newFallen = [...fallenOperatives];
+    let updatedOperatives = [...operatives];
+    for (const unit of tacticalUnits) {
+      if (!unit.isPlayer || !unit.operativeId) continue;
+      const opIdx = updatedOperatives.findIndex(o => o.id === unit.operativeId);
+      if (opIdx === -1) continue;
+      const op = updatedOperatives[opIdx];
+
+      if (unit.hp <= 0) {
+        // PERMADEATH — name goes on the memorial wall
+        newFallen.push({
+          name: op.name,
+          callsign: op.callsign,
+          class: op.class,
+          level: op.level,
+          missionsCompleted: op.missionsCompleted,
+          kills: op.kills + (unit.kills ?? 0),
+          causeOfDeath: `KIA — ${mission.type} mission, ${territories[tid]?.name ?? 'unknown territory'}`,
+          turnKilled: turn,
+        });
+        updatedOperatives = updatedOperatives.filter(o => o.id !== unit.operativeId);
+        ticker.push(`${op.callsign ? `"${op.callsign}" ` : ''}${op.name} was killed in action.`);
+      } else {
+        // Survivor: XP, kills, mission count; wounded if hurt
+        const xpGain = 30 + (unit.kills ?? 0) * 20 + (result === 'victory' ? 20 : 0);
+        let { level, xp, xpToNext, maxHp, aim, will } = op;
+        xp += xpGain;
+        while (xp >= xpToNext && level < 10) {
+          xp -= xpToNext;
+          level++;
+          xpToNext = 100 * level;
+          maxHp++; aim += 2; will += 3;
+        }
+        const hpFrac = unit.hp / unit.maxHp;
+        const wounded = hpFrac < 0.999;
+        updatedOperatives[opIdx] = {
+          ...op,
+          level, xp, xpToNext, maxHp, aim, will,
+          kills: op.kills + (unit.kills ?? 0),
+          missionsCompleted: op.missionsCompleted + 1,
+          status: wounded ? 'wounded' : 'active',
+          woundedTurns: wounded ? (hpFrac < 0.34 ? 3 : hpFrac < 0.67 ? 2 : 1) : 0,
+          hp: wounded ? unit.hp : maxHp,
+        };
+      }
+    }
 
     if (result === 'victory' && tid && territories[tid]) {
       const oldCtrl = territories[tid].controller;
@@ -549,6 +631,63 @@ export const useGameStore = create<GameState>((set, get) => ({
     } else {
       ticker.push(`Mission ${result}: operatives returning to base`);
     }
-    set({ phase: 'strategic', mission: null, grid: [], tacticalUnits: [], combatLog: [], territories: updatedTerritories, factions: updatedFactions, newsTicker: ticker });
+    set({
+      phase: 'strategic', mission: null, grid: [], tacticalUnits: [], combatLog: [],
+      territories: updatedTerritories, factions: updatedFactions, newsTicker: ticker,
+      operatives: updatedOperatives, fallenOperatives: newFallen,
+    });
+  },
+
+  // ---- Espionage ----
+  deploySpy: (spyId, territoryId, action) => {
+    const { spies, territories, factions, playerFaction, actionsRemaining, intelReports, newsTicker, turn, diplomacy } = get();
+    if (actionsRemaining <= 0 || !playerFaction) return;
+    const spy = spies.find(s => s.id === spyId);
+    const target = territories[territoryId];
+    if (!spy || spy.isCompromised || !target || !target.controller || target.controller === playerFaction) return;
+
+    const ticker = [...newsTicker];
+    const reports = [...intelReports];
+    const updatedTerritories = { ...territories };
+    let updatedSpies = [...spies];
+    const newDiplomacy = { ...diplomacy, relations: { ...diplomacy.relations } };
+
+    // Detection: base risk per action, reduced by spy skill (5%/level)
+    const baseRisk: Record<string, number> = { gatherIntel: 0.10, sabotage: 0.35, inciteUnrest: 0.30, stealTech: 0.50, assassination: 0.60, counterIntelligence: 0 };
+    const risk = Math.max(0.02, (baseRisk[action] ?? 0.3) - spy.skillLevel * 0.05);
+    const detected = Math.random() < risk;
+
+    if (detected) {
+      updatedSpies = updatedSpies.map(s => s.id === spyId ? { ...s, isCompromised: true, location: null } : s);
+      const rk = relationKey(playerFaction, target.controller);
+      newDiplomacy.relations[rk] = Math.max(-100, (newDiplomacy.relations[rk] ?? 0) - 15);
+      ticker.push(`${spy.name} was captured in ${target.name}. ${FACTION_NAMES[target.controller]} relations damaged.`);
+    } else {
+      if (action === 'gatherIntel') {
+        const f = factions[target.controller];
+        reports.unshift({
+          id: `intel_${Date.now()}`,
+          turn,
+          source: spy.name,
+          content: `${target.name}: ${target.troops} troops, fortification ${target.fortification}, unrest ${target.unrest}%. ${FACTION_NAMES[target.controller]} holds ${f.territories.length} territories.`,
+          faction: target.controller,
+          type: 'troops',
+        });
+        ticker.push(`${spy.name} gathered intel on ${target.name}.`);
+      } else if (action === 'sabotage') {
+        updatedTerritories[territoryId] = { ...target, troops: Math.max(1, target.troops - Math.floor(3 + Math.random() * 5)) };
+        ticker.push(`Sabotage in ${target.name}: enemy garrison weakened.`);
+      } else if (action === 'inciteUnrest') {
+        updatedTerritories[territoryId] = { ...target, unrest: Math.min(100, target.unrest + 15 + Math.floor(Math.random() * 16)) };
+        ticker.push(`Unrest rising in ${target.name}.`);
+      }
+      // Successful mission trains the spy
+      updatedSpies = updatedSpies.map(s => s.id === spyId ? { ...s, skillLevel: Math.min(5, s.skillLevel + (Math.random() < 0.3 ? 1 : 0)), location: territoryId } : s);
+    }
+
+    set({
+      spies: updatedSpies, territories: updatedTerritories, intelReports: reports,
+      newsTicker: ticker, actionsRemaining: actionsRemaining - 1, diplomacy: newDiplomacy,
+    });
   },
 }));

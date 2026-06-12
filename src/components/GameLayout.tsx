@@ -20,6 +20,7 @@ import { AnimatePresence } from 'framer-motion';
 export default function GameLayout() {
   const phase = useGameStore((s) => s.phase);
   const currentEvent = useGameStore((s) => s.currentEvent);
+  const mission = useGameStore((s) => s.mission);
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-[#080c14] text-[#e2e8f0] select-none">
@@ -45,7 +46,7 @@ export default function GameLayout() {
 
         {phase === 'tactical' && (
           <div key="tactical" className="w-full h-full">
-            <TacticalGrid />
+            {mission && !mission.deployed ? <MissionBriefing /> : <TacticalGrid />}
           </div>
         )}
 

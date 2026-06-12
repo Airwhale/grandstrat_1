@@ -1,13 +1,18 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { FACTION_COLORS } from '@/data/factions';
-import type { TacticalUnit, Tile, TileType } from '@/types';
+import { calculateHitChance } from '@/store/helpers';
+import type { TileType } from '@/types';
 
 const TILE_SIZE = 40;
 const TILE_GAP = 1;
+
+// Fixed unit colors for readability regardless of player faction
+const FRIENDLY_COLOR = '#3B82F6';
+const ENEMY_COLOR = '#EF4444';
 
 const TILE_COLORS: Record<TileType, string> = {
   floor: '#1a1a2e',
@@ -49,6 +54,7 @@ export default function TacticalGrid() {
 
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [actionMode, setActionMode] = useState<'move' | 'attack' | null>(null);
+  const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
 
   const accentColor = playerFaction ? FACTION_COLORS[playerFaction] : '#3B82F6';
 
@@ -79,14 +85,15 @@ export default function TacticalGrid() {
         const ny = selectedUnit.position.y + dy;
         if (ny >= 0 && ny < grid.length && nx >= 0 && nx < (grid[0]?.length ?? 0)) {
           const tile = grid[ny]?.[nx];
-          if (tile && tile.type !== 'wall' && tile.type !== 'water' && !tile.occupant) {
+          const occupied = tacticalUnits.some(u => u.hp > 0 && u.position.x === nx && u.position.y === ny);
+          if (tile && tile.type !== 'wall' && tile.type !== 'water' && !occupied) {
             range.add(`${nx},${ny}`);
           }
         }
       }
     }
     return range;
-  }, [selectedUnit, actionMode, grid]);
+  }, [selectedUnit, actionMode, grid, tacticalUnits]);
 
   // Attack range
   const attackRange = useMemo(() => {
@@ -94,6 +101,7 @@ export default function TacticalGrid() {
     const range = new Set<string>();
     const maxRange = 8;
     for (const enemy of enemyUnits) {
+      if (enemy.hp <= 0) continue;
       const dx = Math.abs(enemy.position.x - selectedUnit.position.x);
       const dy = Math.abs(enemy.position.y - selectedUnit.position.y);
       if (dx + dy <= maxRange) {
@@ -102,6 +110,27 @@ export default function TacticalGrid() {
     }
     return range;
   }, [selectedUnit, actionMode, enemyUnits]);
+
+  // Hit chance per targetable enemy (shown as badges in attack mode)
+  const targetHitChances = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!selectedUnit || actionMode !== 'attack') return map;
+    for (const enemy of enemyUnits) {
+      if (enemy.hp <= 0) continue;
+      if (attackRange.has(`${enemy.position.x},${enemy.position.y}`)) {
+        map.set(enemy.id, calculateHitChance(selectedUnit, enemy, grid).hitPercent);
+      }
+    }
+    return map;
+  }, [selectedUnit, actionMode, enemyUnits, attackRange, grid]);
+
+  // Full shot breakdown for the hovered target (transparency: why this %)
+  const hoveredBreakdown = useMemo(() => {
+    if (!selectedUnit || !hoveredTargetId || actionMode !== 'attack') return null;
+    const target = tacticalUnits.find((u) => u.id === hoveredTargetId && u.hp > 0);
+    if (!target || target.isPlayer) return null;
+    return { targetName: target.name, ...calculateHitChance(selectedUnit, target, grid) };
+  }, [selectedUnit, hoveredTargetId, actionMode, tacticalUnits, grid]);
 
   const handleTileClick = useCallback((x: number, y: number) => {
     const store = useGameStore.getState() as any;
@@ -113,16 +142,17 @@ export default function TacticalGrid() {
     }
 
     if (actionMode === 'attack' && selectedUnit) {
-      const target = tacticalUnits.find((u) => u.position.x === x && u.position.y === y && !u.isPlayer);
+      const target = tacticalUnits.find((u) => u.hp > 0 && u.position.x === x && u.position.y === y && !u.isPlayer);
       if (target && store.attackUnit) {
         store.attackUnit(selectedUnitId, target.id);
         setActionMode(null);
+        setHoveredTargetId(null);
         return;
       }
     }
 
     // Select unit on tile
-    const unitOnTile = tacticalUnits.find((u) => u.position.x === x && u.position.y === y && u.isPlayer);
+    const unitOnTile = tacticalUnits.find((u) => u.hp > 0 && u.position.x === x && u.position.y === y && u.isPlayer);
     if (unitOnTile) {
       setSelectedUnitId(unitOnTile.id);
       setActionMode(null);
@@ -192,11 +222,12 @@ export default function TacticalGrid() {
             {grid.map((row, y) =>
               row.map((tile, x) => {
                 const key = `${x},${y}`;
-                const unitHere = tacticalUnits.find((u) => u.position.x === x && u.position.y === y);
+                const unitHere = tacticalUnits.find((u) => u.hp > 0 && u.position.x === x && u.position.y === y);
                 const isInMoveRange = moveRange.has(key);
                 const isInAttackRange = attackRange.has(key);
                 const isSelected = unitHere?.id === selectedUnitId;
                 const isObjective = tile.type === 'objective';
+                const hitChance = unitHere && !unitHere.isPlayer ? targetHitChances.get(unitHere.id) : undefined;
 
                 return (
                   <div
@@ -240,13 +271,15 @@ export default function TacticalGrid() {
                       <motion.div
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
+                        onMouseEnter={() => { if (!unitHere.isPlayer) setHoveredTargetId(unitHere.id); }}
+                        onMouseLeave={() => { if (!unitHere.isPlayer) setHoveredTargetId(null); }}
                         className="absolute inset-1 rounded-full flex items-center justify-center text-[10px] font-bold"
                         style={{
                           backgroundColor: unitHere.isPlayer
-                            ? `${accentColor}cc`
-                            : '#EF4444cc',
+                            ? `${FRIENDLY_COLOR}cc`
+                            : `${ENEMY_COLOR}cc`,
                           color: '#fff',
-                          border: isSelected ? '2px solid #fff' : '1px solid #ffffff44',
+                          border: isSelected ? '2px solid #fff' : unitHere.isPlayer ? '1px solid #93c5fd88' : '1px solid #fca5a588',
                           boxShadow: unitHere.isInOverwatch
                             ? '0 0 8px #3B82F6'
                             : unitHere.isCloaked
@@ -254,6 +287,19 @@ export default function TacticalGrid() {
                               : 'none',
                         }}
                       >
+                        {/* Hit chance badge in attack mode */}
+                        {hitChance !== undefined && (
+                          <div
+                            className="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold pointer-events-none z-10"
+                            style={{
+                              backgroundColor: '#080c14ee',
+                              color: hitChance >= 65 ? '#22c55e' : hitChance >= 40 ? '#eab308' : '#ef4444',
+                              border: '1px solid #334155',
+                            }}
+                          >
+                            {hitChance}%
+                          </div>
+                        )}
                         {getClassInitial(unitHere.class)}
                         {/* HP indicator */}
                         <div
@@ -338,6 +384,33 @@ export default function TacticalGrid() {
               <p className="text-[10px] text-slate-600 italic">Click a unit to select</p>
             )}
           </div>
+
+          {/* Shot breakdown (attack mode, hovering a target) */}
+          {hoveredBreakdown && (
+            <div className="p-3 border-b border-slate-800 bg-red-950/20">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-2">
+                Shot: {hoveredBreakdown.targetName}
+              </p>
+              <div className="space-y-0.5">
+                {hoveredBreakdown.breakdown.map((line, i) => (
+                  <p key={i} className="text-[10px] font-mono text-slate-400">{line}</p>
+                ))}
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-800 flex justify-between">
+                <span className="text-[10px] uppercase text-slate-500">To Hit</span>
+                <span
+                  className="text-sm font-mono font-bold"
+                  style={{ color: hoveredBreakdown.hitPercent >= 65 ? '#22c55e' : hoveredBreakdown.hitPercent >= 40 ? '#eab308' : '#ef4444' }}
+                >
+                  {hoveredBreakdown.hitPercent}%
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[10px] uppercase text-slate-500">Crit</span>
+                <span className="text-sm font-mono font-bold text-yellow-400">{hoveredBreakdown.critPercent}%</span>
+              </div>
+            </div>
+          )}
 
           {/* Squad list */}
           <div className="p-3 border-b border-slate-800">

@@ -1,5 +1,11 @@
-import type { FactionId, Territory, Faction, DiplomacyState, Spy, TacticalUnit, Tile, Mission, CombatLogEntry } from '@/types';
+import type { FactionId, Territory, Faction, DiplomacyState, Spy, TacticalUnit, Tile, Mission, CombatLogEntry, Operative } from '@/types';
 import { generateCombatMap } from '@/data/combatMaps';
+
+// Weapon damage by operative class (operatives don't carry this stat directly)
+const CLASS_WEAPON_DMG: Record<string, number> = {
+  assault: 4, sharpshooter: 5, heavy: 4, medic: 3, infiltrator: 4, specialist: 3,
+  cyberGhost: 3, spetsnazVanguard: 5, silkAgent: 3, sufiPhantom: 4, bushveldRanger: 5, ghostBroker: 3,
+};
 
 // ---- Faction IDs ----
 export const FACTION_IDS: FactionId[] = ['atlantic', 'eastern', 'jade', 'solar', 'southern', 'freecities'];
@@ -136,10 +142,11 @@ export function generateSpy(faction: FactionId): Spy {
 }
 
 // ---- Tactical Combat Setup ----
+// Deploys the player's ACTUAL named operatives (up to 5, highest level first).
 export function setupTacticalCombat(
   terrain: Territory['terrain'],
   playerFaction: FactionId,
-  attackerTroops: number,
+  roster: Operative[],
   defenderTroops: number,
 ): { grid: Tile[][]; units: TacticalUnit[]; mission: Mission } {
   const mapData = generateCombatMap(terrain);
@@ -161,25 +168,29 @@ export function setupTacticalCombat(
     }))
   );
 
-  // Place player units (top-left area)
-  const playerCount = Math.min(4, Math.max(2, Math.floor(attackerTroops / 8)));
+  // Squad = active operatives of the player's faction, best first, max 5
+  const squad = roster
+    .filter((o) => o.faction === playerFaction && o.status === 'active')
+    .sort((a, b) => b.level - a.level)
+    .slice(0, 5);
+
   const playerUnits: TacticalUnit[] = [];
-  const classes = ['assault', 'sharpshooter', 'heavy', 'medic'] as const;
   let placed = 0;
-  for (let y = 0; y < 3 && placed < playerCount; y++) {
-    for (let x = 0; x < 4 && placed < playerCount; x++) {
+  for (let y = 0; y < 4 && placed < squad.length; y++) {
+    for (let x = 0; x < 5 && placed < squad.length; x++) {
       if (grid[y]?.[x]?.type === 'floor' || grid[y]?.[x]?.type === 'halfCover') {
-        const cls = classes[placed % classes.length];
-        const unit: TacticalUnit = {
+        const op = squad[placed];
+        playerUnits.push({
           id: `player_${placed}`,
-          name: `Operative ${placed + 1}`,
+          operativeId: op.id,
+          name: op.callsign ? `"${op.callsign}" ${op.name.split(' ')[1] ?? op.name}` : op.name,
           isPlayer: true,
-          class: cls,
-          hp: cls === 'heavy' ? 10 : cls === 'medic' ? 7 : 8,
-          maxHp: cls === 'heavy' ? 10 : cls === 'medic' ? 7 : 8,
-          armor: cls === 'heavy' ? 1 : 0,
-          aim: cls === 'sharpshooter' ? 15 : 5,
-          mobility: cls === 'heavy' ? 4 : 5,
+          class: op.class,
+          hp: op.hp,
+          maxHp: op.maxHp,
+          armor: op.armor,
+          aim: op.aim,
+          mobility: op.mobility,
           position: { x, y },
           actionsRemaining: 2,
           maxActions: 2,
@@ -188,10 +199,10 @@ export function setupTacticalCombat(
           isCloaked: false,
           statusEffects: [],
           behaviorProfile: 'aggressive',
-          abilities: [],
-          weaponDamage: cls === 'sharpshooter' ? 5 : 4,
-        };
-        playerUnits.push(unit);
+          abilities: op.abilities,
+          weaponDamage: CLASS_WEAPON_DMG[op.class] ?? 4,
+          kills: 0,
+        });
         placed++;
       }
     }

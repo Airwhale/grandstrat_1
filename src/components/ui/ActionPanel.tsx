@@ -10,6 +10,7 @@ import type {
   Territory,
   OperativeClass,
   BuildingType,
+  SpyAction,
 } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,7 @@ type SelectionStep =
   | 'pickTech'
   | 'pickClass'
   | 'pickSpy'
+  | 'pickSpyAction'
   | 'confirm';
 
 interface ActionDef {
@@ -75,6 +77,12 @@ const BUILDING_OPTIONS: { type: BuildingType; label: string; icon: string; cost:
   { type: 'recruitCenter', label: 'Recruit Center', icon: '\u{1F396}\uFE0F', cost: 90 },
 ];
 
+const SPY_MISSIONS: { action: SpyAction; label: string; icon: string; description: string; risk: string; riskColor: string }[] = [
+  { action: 'gatherIntel', label: 'Gather Intel', icon: '\u{1F4E1}', description: 'Reveal enemy troops, fortification, and unrest', risk: 'LOW RISK', riskColor: 'text-green-400' },
+  { action: 'sabotage', label: 'Sabotage', icon: '\u{1F4A3}', description: 'Weaken enemy garrison by 3-8 troops', risk: 'MED RISK', riskColor: 'text-yellow-400' },
+  { action: 'inciteUnrest', label: 'Incite Unrest', icon: '\u{1F525}', description: 'Raise unrest by 15-30 in target territory', risk: 'MED RISK', riskColor: 'text-yellow-400' },
+];
+
 const RECRUIT_CLASSES: { cls: OperativeClass; label: string; icon: string }[] = [
   { cls: 'assault', label: 'Assault', icon: '\u{1F4A5}' },
   { cls: 'sharpshooter', label: 'Sharpshooter', icon: '\u{1F3AF}' },
@@ -110,6 +118,9 @@ export default function ActionPanel() {
   const [sourceTerritory, setSourceTerritory] = useState<string | null>(null);
   const [troopCount, setTroopCount] = useState(1);
   const [endTurnConfirm, setEndTurnConfirm] = useState(false);
+  const [selectedSpyId, setSelectedSpyId] = useState<string | null>(null);
+
+  const spies = useGameStore((s) => s.spies);
 
   // Derived data - territories is Record<string, Territory>
   const territoryList = useMemo(() => Object.values(territories), [territories]);
@@ -139,12 +150,23 @@ export default function ActionPanel() {
     return sourceTerritoryData.adjacency.map((id) => territories[id]).filter(Boolean) as Territory[];
   }, [sourceTerritoryData, territories]);
 
+  const availableSpies = useMemo(
+    () => spies.filter((s) => s.faction === playerFaction && !s.isCompromised),
+    [spies, playerFaction],
+  );
+
+  const enemyTerritories = useMemo(
+    () => territoryList.filter((t) => t.controller !== null && t.controller !== playerFaction),
+    [territoryList, playerFaction],
+  );
+
   // Handlers
   const resetMode = useCallback(() => {
     setActiveMode(null);
     setStep('pickSource');
     setSourceTerritory(null);
     setTroopCount(1);
+    setSelectedSpyId(null);
   }, []);
 
   function handleActionClick(action: ActionDef) {
@@ -400,33 +422,81 @@ export default function ActionPanel() {
           </div>
         )}
 
-        {/* Espionage sub-panel */}
+        {/* Espionage: pick spy */}
         {activeMode === 'espionage' && step === 'pickSpy' && (
           <div>
-            <p className="text-[11px] text-gray-400 mb-2">Spy deployment:</p>
+            <p className="text-[11px] text-gray-400 mb-2">Select agent:</p>
             <div className="space-y-1">
-              {(() => {
-                const spies = useGameStore.getState().spies ?? [];
-                const factionSpies = spies.filter((s) => s.faction === playerFaction);
-                if (factionSpies.length === 0) {
-                  return <p className="text-[10px] text-gray-600 italic">No spies available. Build a Spy Network first.</p>;
-                }
-                return factionSpies.map((spy) => (
+              {availableSpies.length === 0 ? (
+                <p className="text-[10px] text-gray-600 italic">No agents available. They may be compromised.</p>
+              ) : (
+                availableSpies.map((spy) => (
                   <button
                     key={spy.id}
                     onClick={() => {
-                      // Spy actions handled through espionage screen (future)
-                      resetMode();
+                      setSelectedSpyId(spy.id);
+                      setStep('pickTarget');
                     }}
                     className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-800 transition-colors text-gray-300 flex justify-between"
                   >
                     <span>{spy.name}</span>
-                    <span className={`text-[10px] ${spy.isCompromised ? 'text-red-400' : 'text-green-400'}`}>
-                      {spy.isCompromised ? 'COMPROMISED' : spy.location ? 'Deployed' : 'Available'}
-                    </span>
+                    <span className="text-[10px] text-green-400 font-mono">SKILL {spy.skillLevel}</span>
                   </button>
-                ));
-              })()}
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Espionage: pick target territory */}
+        {activeMode === 'espionage' && step === 'pickTarget' && (
+          <div>
+            <p className="text-[11px] text-gray-400 mb-2">Select target territory:</p>
+            <div className="max-h-40 overflow-y-auto space-y-1 custom-scrollbar">
+              {enemyTerritories.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    selectTerritory(t.id);
+                    setStep('pickSpyAction');
+                  }}
+                  className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-800 transition-colors text-gray-300 flex justify-between items-center"
+                >
+                  <span>{t.name}</span>
+                  <span className="text-gray-500 font-mono">{t.controller}</span>
+                </button>
+              ))}
+              {enemyTerritories.length === 0 && (
+                <p className="text-[10px] text-gray-600 italic">No enemy territories known</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Espionage: pick action */}
+        {activeMode === 'espionage' && step === 'pickSpyAction' && (
+          <div>
+            <p className="text-[11px] text-gray-400 mb-2">Mission type:</p>
+            <div className="space-y-1">
+              {SPY_MISSIONS.map((m) => (
+                <button
+                  key={m.action}
+                  onClick={() => {
+                    const s = useGameStore.getState();
+                    if (selectedSpyId && selectedTerritory) {
+                      s.deploySpy(selectedSpyId, selectedTerritory, m.action);
+                    }
+                    resetMode();
+                  }}
+                  className="w-full text-left text-xs px-2 py-2 rounded hover:bg-gray-800 transition-colors text-gray-300"
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold">{m.icon} {m.label}</span>
+                    <span className={`text-[10px] font-mono ${m.riskColor}`}>{m.risk}</span>
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{m.description}</p>
+                </button>
+              ))}
             </div>
           </div>
         )}

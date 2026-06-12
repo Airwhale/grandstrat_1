@@ -202,6 +202,7 @@ export interface TacticalUnit {
   behaviorProfile: 'aggressive' | 'defensive' | 'support' | 'boss';
   abilities: AbilityId[];
   weaponDamage: number;
+  kills?: number; // kills scored this mission (player units)
 }
 
 export interface StatusEffect {
@@ -225,6 +226,7 @@ export interface Mission {
   playerTurn: boolean;
   isComplete: boolean;
   result: 'victory' | 'defeat' | 'retreat' | null;
+  deployed?: boolean; // false until player confirms deployment from briefing
 }
 
 export interface MissionObjective {

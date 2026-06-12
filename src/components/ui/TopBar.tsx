@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { FACTION_COLORS } from '@/data/factions';
+import HelpModal from '@/components/ui/HelpModal';
 
 export default function TopBar() {
   const {
@@ -19,11 +20,13 @@ export default function TopBar() {
   } = useGameStore();
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const playerData = playerFaction ? factions[playerFaction] : null;
   const resources = playerData?.resources;
   const accentColor = playerFaction ? FACTION_COLORS[playerFaction] : '#6B7280';
+  const territoryCount = playerData?.territories.length ?? 0;
 
   const actionsRemaining = useGameStore((s) => s.actionsRemaining) ?? 5;
 
@@ -123,8 +126,44 @@ export default function TopBar() {
           ))}
       </div>
 
-      {/* Right: Actions + Menu */}
+      {/* Right: Nav + Actions + Menu */}
       <div className="flex items-center gap-4">
+        {/* Screen navigation */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setPhase('roster_screen')}
+            title="Operative roster & memorial wall"
+            className="text-[11px] uppercase tracking-wider px-2.5 py-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          >
+            Roster
+          </button>
+          <button
+            onClick={() => setPhase('tech_screen')}
+            title="Technology tree"
+            className="text-[11px] uppercase tracking-wider px-2.5 py-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          >
+            Tech
+          </button>
+          <button
+            onClick={() => setHelpOpen(true)}
+            title="How to play"
+            className="text-[11px] font-bold px-2.5 py-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors border border-gray-700"
+          >
+            ?
+          </button>
+        </div>
+
+        {/* Victory progress */}
+        <div
+          className="flex items-center gap-1.5 group relative"
+          title="Domination victory: control 30 territories"
+        >
+          <span className="text-xs text-gray-400 uppercase tracking-wider">Territories</span>
+          <span className="font-mono text-sm font-bold" style={{ color: accentColor }}>
+            {territoryCount}<span className="text-gray-500">/30</span>
+          </span>
+        </div>
+
         {/* Actions Remaining */}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-400 uppercase tracking-wider">
@@ -292,6 +331,9 @@ export default function TopBar() {
           </AnimatePresence>
         </div>
       </div>
+
+      {/* Help overlay */}
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
