@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { FACTION_COLORS } from '@/data/factions';
 import { calculateHitChance } from '@/store/helpers';
+import Tooltip from '@/components/ui/Tooltip';
 import type { TileType } from '@/types';
 
 const TILE_SIZE = 40;
@@ -462,44 +463,95 @@ export default function TacticalGrid() {
       {/* Bottom action bar */}
       <div className="h-14 flex items-center justify-between px-4 border-t border-slate-800 bg-[#111827] shrink-0">
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setActionMode('move')}
-            disabled={!selectedUnit || !mission.playerTurn || (selectedUnit?.actionsRemaining ?? 0) < 1}
-            className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
-              actionMode === 'move' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-            } disabled:opacity-30 disabled:cursor-not-allowed`}
+          <Tooltip
+            side="top"
+            content={
+              <>
+                <span className="block text-xs font-bold text-slate-200 mb-1">Move (1 AP)</span>
+                <span className="block text-[11px] text-slate-400 leading-snug">Highlighted blue tiles are in range — click one to move there. Ends near cover for protection.</span>
+              </>
+            }
           >
-            Move
-          </button>
-          <button
-            onClick={() => setActionMode('attack')}
-            disabled={!selectedUnit || !mission.playerTurn || (selectedUnit?.actionsRemaining ?? 0) < 1}
-            className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
-              actionMode === 'attack' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-            } disabled:opacity-30 disabled:cursor-not-allowed`}
+            <button
+              onClick={() => setActionMode(actionMode === 'move' ? null : 'move')}
+              disabled={!selectedUnit || !mission.playerTurn || (selectedUnit?.actionsRemaining ?? 0) < 1}
+              className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
+                actionMode === 'move' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            >
+              Move
+            </button>
+          </Tooltip>
+          <Tooltip
+            side="top"
+            content={
+              <>
+                <span className="block text-xs font-bold text-slate-200 mb-1">Attack (1 AP)</span>
+                <span className="block text-[11px] text-slate-400 leading-snug">Targets in range show a hit % badge. Hover a target for the full shot breakdown, click to fire.</span>
+              </>
+            }
           >
-            Attack
-          </button>
-          <button
-            onClick={() => {
-              const store = useGameStore.getState() as any;
-              if (store.setUnitOverwatch && selectedUnitId) store.setUnitOverwatch(selectedUnitId);
-            }}
-            disabled={!selectedUnit || !mission.playerTurn || (selectedUnit?.actionsRemaining ?? 0) < 2}
-            className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            <button
+              onClick={() => setActionMode(actionMode === 'attack' ? null : 'attack')}
+              disabled={!selectedUnit || !mission.playerTurn || (selectedUnit?.actionsRemaining ?? 0) < 1}
+              className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
+                actionMode === 'attack' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            >
+              Attack
+            </button>
+          </Tooltip>
+          <Tooltip
+            side="top"
+            content={
+              <>
+                <span className="block text-xs font-bold text-slate-200 mb-1">Overwatch (2 AP)</span>
+                <span className="block text-[11px] text-slate-400 leading-snug">Hold position and fire a reaction shot at the first enemy that moves in sight. Great for defending chokepoints.</span>
+              </>
+            }
           >
-            Overwatch
-          </button>
-          <button
-            onClick={() => {
-              const store = useGameStore.getState() as any;
-              if (store.setUnitHunker && selectedUnitId) store.setUnitHunker(selectedUnitId);
-            }}
-            disabled={!selectedUnit || !mission.playerTurn || (selectedUnit?.actionsRemaining ?? 0) < 2}
-            className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            <button
+              onClick={() => {
+                if (selectedUnitId) useGameStore.getState().setUnitOverwatch(selectedUnitId);
+                setActionMode(null);
+              }}
+              disabled={!selectedUnit || !mission.playerTurn || (selectedUnit?.actionsRemaining ?? 0) < 2}
+              className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Overwatch
+            </button>
+          </Tooltip>
+          <Tooltip
+            side="top"
+            content={
+              <>
+                <span className="block text-xs font-bold text-slate-200 mb-1">Hunker Down (2 AP)</span>
+                <span className="block text-[11px] text-slate-400 leading-snug">Double your cover bonus until next turn. Cannot act, but very hard to hit.</span>
+              </>
+            }
           >
-            Hunker
-          </button>
+            <button
+              onClick={() => {
+                if (selectedUnitId) useGameStore.getState().setUnitHunker(selectedUnitId);
+                setActionMode(null);
+              }}
+              disabled={!selectedUnit || !mission.playerTurn || (selectedUnit?.actionsRemaining ?? 0) < 2}
+              className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wider bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Hunker
+            </button>
+          </Tooltip>
+
+          {/* Contextual instruction */}
+          <span className="ml-3 text-[11px] text-slate-500 italic">
+            {!selectedUnit
+              ? 'Click one of your blue units to select it'
+              : actionMode === 'move'
+                ? 'Click a highlighted blue tile to move'
+                : actionMode === 'attack'
+                  ? 'Click a red target — the badge shows your hit chance'
+                  : `${selectedUnit.name}: ${selectedUnit.actionsRemaining} AP remaining`}
+          </span>
         </div>
 
         <div className="flex items-center gap-2">

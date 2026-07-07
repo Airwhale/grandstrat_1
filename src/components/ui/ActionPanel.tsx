@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { FACTION_COLORS } from '@/data/factions';
 import { getAvailableTechs } from '@/data/technologies';
+import Tooltip, { CostLine } from '@/components/ui/Tooltip';
 import type {
   StrategicActionType,
   Territory,
@@ -46,6 +47,8 @@ interface ActionDef {
   label: string;
   description: string;
   subMode: SubMode;
+  cost?: string;
+  hint?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,16 +56,16 @@ interface ActionDef {
 // ---------------------------------------------------------------------------
 
 const ACTIONS: ActionDef[] = [
-  { type: 'moveForces', icon: '\u{1F6E1}\uFE0F', label: 'Move Forces', description: 'Relocate troops between your territories', subMode: 'moveForces' },
-  { type: 'attackTerritory', icon: '\u2694\uFE0F', label: 'Attack', description: 'Launch an assault on an adjacent territory', subMode: 'attack' },
-  { type: 'diplomacy', icon: '\u{1F91D}', label: 'Diplomacy', description: 'Negotiate treaties and alliances', subMode: null },
-  { type: 'espionage', icon: '\u{1F575}\uFE0F', label: 'Espionage', description: 'Deploy and manage spies', subMode: 'espionage' },
-  { type: 'build', icon: '\u{1F3D7}\uFE0F', label: 'Build', description: 'Construct buildings in your territories', subMode: 'build' },
-  { type: 'research', icon: '\u{1F52C}', label: 'Research', description: 'Unlock new technologies', subMode: 'research' },
-  { type: 'recruit', icon: '\u{1F4E2}', label: 'Recruit', description: 'Hire new operatives (50 credits, 10 manpower)', subMode: 'recruit' },
-  { type: 'covertOp', icon: '\u{1F5E1}\uFE0F', label: 'Covert Op', description: 'Launch a covert tactical mission', subMode: 'covertOp' },
-  { type: 'trade', icon: '\u{1F4B1}', label: 'Trade', description: 'Establish trade routes between territories', subMode: 'trade' },
-  { type: 'restRefit', icon: '\u{1FA79}', label: 'Rest & Refit', description: 'Heal wounded operatives', subMode: 'restRefit' },
+  { type: 'moveForces', icon: '\u{1F6E1}\uFE0F', label: 'Move Forces', description: 'Relocate troops between adjacent territories you control.', subMode: 'moveForces', cost: '1 action', hint: 'Mass troops on a border before attacking. Always leave at least 1 defender behind.' },
+  { type: 'attackTerritory', icon: '\u2694\uFE0F', label: 'Attack', description: 'Quick auto-resolved assault on an adjacent enemy or neutral territory.', subMode: 'attack', cost: '1 action', hint: 'Outcome depends on troop counts, fortification, and luck. Neutral gray territories are the softest targets.' },
+  { type: 'diplomacy', icon: '\u{1F91D}', label: 'Diplomacy', description: 'Open the relationship web to propose treaties, alliances, or threats.', subMode: null, cost: '5-35 influence', hint: 'Trade deals boost income and relations. Betrayal is remembered.' },
+  { type: 'espionage', icon: '\u{1F575}\uFE0F', label: 'Espionage', description: 'Send an agent to gather intel, sabotage a garrison, or incite unrest.', subMode: 'espionage', cost: '1 action', hint: 'Riskier missions have higher detection chance. Captured spies damage relations.' },
+  { type: 'build', icon: '\u{1F3D7}\uFE0F', label: 'Build', description: 'Construct a building in a territory you control.', subMode: 'build', cost: '90-200 credits', hint: 'Banks and factories raise income. Labs raise research. Hospitals heal wounded faster.' },
+  { type: 'research', icon: '\u{1F52C}', label: 'Research', description: 'Start researching a technology (military, economic, or intelligence).', subMode: 'research', cost: '40-300 tech pts', hint: 'One tech at a time, 1-3 turns each. View the full tree via TECH in the top bar.' },
+  { type: 'recruit', icon: '\u{1F4E2}', label: 'Recruit', description: 'Train a new operative for your tactical squad.', subMode: 'recruit', cost: '50\uD83D\uDCB0 + 10\uD83D\uDC65', hint: 'Rookies start at level 1. Veterans are earned, not bought.' },
+  { type: 'covertOp', icon: '\u{1F5E1}\uFE0F', label: 'Covert Op', description: 'Deploy your named operatives into XCOM-style tactical combat.', subMode: 'covertOp', cost: '1 action', hint: 'Better results than auto-resolve \u2014 but operatives at 0 HP die PERMANENTLY.' },
+  { type: 'trade', icon: '\u{1F4B1}', label: 'Trade', description: 'Establish a trade route between two of your territories.', subMode: 'trade', cost: '1 action', hint: 'Passive income each turn while the route holds.' },
+  { type: 'restRefit', icon: '\u{1FA79}', label: 'Rest & Refit', description: 'Accelerate recovery for all wounded operatives by 1 turn.', subMode: 'restRefit', cost: '1 action', hint: 'Wounded operatives cannot deploy until healed.' },
 ];
 
 const BUILDING_OPTIONS: { type: BuildingType; label: string; icon: string; cost: number }[] = [
@@ -582,25 +585,44 @@ export default function ActionPanel() {
           const disabled = actionsRemaining <= 0;
 
           return (
-            <button
+            <Tooltip
               key={action.type}
-              onClick={() => handleActionClick(action)}
-              disabled={disabled}
-              title={action.description}
-              className={`
-                w-full text-left text-xs px-3 py-2 rounded flex items-center gap-2
-                transition-all duration-150
-                ${disabled ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-800 cursor-pointer'}
-              `}
-              style={
-                isActive
-                  ? { backgroundColor: `${accentColor}22`, color: accentColor, border: `1px solid ${accentColor}44` }
-                  : { color: '#D1D5DB', border: '1px solid transparent' }
+              side="right"
+              className="block w-full"
+              content={
+                <>
+                  <span className="block text-xs font-bold text-slate-200 mb-1">{action.label}</span>
+                  <span className="block text-[11px] text-slate-400 leading-snug">{action.description}</span>
+                  {action.cost && <CostLine label="Cost" value={action.cost} />}
+                  {action.hint && (
+                    <span className="block text-[10px] text-slate-500 italic mt-1.5 pt-1.5 border-t border-slate-800">
+                      {action.hint}
+                    </span>
+                  )}
+                </>
               }
             >
-              <span className="text-sm w-5 text-center shrink-0">{action.icon}</span>
-              <span className="font-medium">{action.label}</span>
-            </button>
+              <button
+                onClick={() => handleActionClick(action)}
+                disabled={disabled}
+                className={`
+                  w-full text-left text-xs px-3 py-2 rounded flex items-center gap-2
+                  transition-all duration-150
+                  ${disabled ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-800 cursor-pointer'}
+                `}
+                style={
+                  isActive
+                    ? { backgroundColor: `${accentColor}22`, color: accentColor, border: `1px solid ${accentColor}44` }
+                    : { color: '#D1D5DB', border: '1px solid transparent' }
+                }
+              >
+                <span className="text-sm w-5 text-center shrink-0">{action.icon}</span>
+                <span className="font-medium">{action.label}</span>
+                {action.cost && (
+                  <span className="ml-auto text-[9px] font-mono text-gray-600">{action.cost.replace(' action', 'a').replace('actions', 'a')}</span>
+                )}
+              </button>
+            </Tooltip>
           );
         })}
       </div>

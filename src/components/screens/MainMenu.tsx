@@ -14,6 +14,7 @@ export default function MainMenu() {
   const setPhase = useGameStore((s) => s.setPhase);
   const getSaves = useGameStore((s) => s.getSaves);
   const loadGame = useGameStore((s) => s.loadGame);
+  const initDemo = useGameStore((s) => s.initDemo);
 
   const [showSaveSlots, setShowSaveSlots] = useState(false);
   const [saves, setSaves] = useState<SaveSlot[]>([]);
@@ -305,6 +306,32 @@ export default function MainMenu() {
             }}
           >
             New Game
+          </motion.button>
+
+          {/* Quick Demo */}
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: hasSaves ? 0.95 : 0.85, duration: 0.5 }}
+            onClick={() => initDemo()}
+            className="w-full py-3.5 rounded text-sm font-bold tracking-[0.2em] uppercase transition-all duration-300 border"
+            style={{
+              backgroundColor: 'rgba(34,197,94,0.08)',
+              borderColor: 'rgba(34,197,94,0.3)',
+              color: '#86efac',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(34,197,94,0.16)';
+              e.currentTarget.style.borderColor = 'rgba(34,197,94,0.5)';
+              e.currentTarget.style.boxShadow = '0 0 25px rgba(34,197,94,0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(34,197,94,0.08)';
+              e.currentTarget.style.borderColor = 'rgba(34,197,94,0.3)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            ▶ Quick Demo
           </motion.button>
 
           {/* Load Game */}

@@ -15,6 +15,7 @@ import RosterScreen from '@/components/screens/RosterScreen';
 import EventModal from '@/components/screens/EventModal';
 import GameOverScreen from '@/components/screens/GameOverScreen';
 import MissionBriefing from '@/components/combat/MissionBriefing';
+import TutorialOverlay from '@/components/ui/TutorialOverlay';
 import { AnimatePresence } from 'framer-motion';
 
 export default function GameLayout() {
@@ -41,6 +42,7 @@ export default function GameLayout() {
             </div>
             <BottomBar />
             {currentEvent && <EventModal />}
+            <TutorialOverlay />
           </div>
         )}
 

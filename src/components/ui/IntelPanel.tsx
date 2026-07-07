@@ -2,15 +2,21 @@
 
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
-import { FACTION_COLORS } from '@/data/factions';
+import { FACTION_COLORS, FACTION_NAMES } from '@/data/factions';
 import type { FactionId } from '@/types';
 
+const BUILDING_LABELS: Record<string, string> = {
+  base: 'Command Base', lab: 'Research Lab', factory: 'Factory', hospital: 'Hospital',
+  spyNetwork: 'Spy Network', bank: 'Bank', mediaCenter: 'Media Center', fortress: 'Fortress', recruitCenter: 'Recruit Center',
+};
+
 export default function IntelPanel() {
-  const { intelReports, playerFaction } = useGameStore();
+  const { intelReports, playerFaction, selectedTerritory, territories, selectTerritory } = useGameStore();
 
   const accentColor = playerFaction ? FACTION_COLORS[playerFaction] : '#6B7280';
 
   const sortedReports = [...intelReports].sort((a, b) => b.turn - a.turn);
+  const selected = selectedTerritory ? territories[selectedTerritory] : null;
 
   return (
     <motion.div
@@ -45,6 +51,67 @@ export default function IntelPanel() {
           [{sortedReports.length}]
         </span>
       </div>
+
+      {/* Selected territory dossier */}
+      {selected && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="shrink-0 border-b"
+          style={{ borderColor: `${accentColor}33`, backgroundColor: '#0d1220' }}
+        >
+          <div className="px-3 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: selected.controller ? FACTION_COLORS[selected.controller] : '#555' }}
+              />
+              <span className="text-xs font-semibold text-white truncate">{selected.name}</span>
+            </div>
+            <button
+              onClick={() => selectTerritory(null)}
+              className="text-slate-600 hover:text-slate-300 text-xs px-1"
+              aria-label="Close territory info"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="px-3 pb-2 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[10px]">
+            <span className="text-slate-500">Controller</span>
+            <span className="text-right" style={{ color: selected.controller ? FACTION_COLORS[selected.controller] : '#94a3b8' }}>
+              {selected.controller ? FACTION_NAMES[selected.controller].replace('The ', '') : 'Neutral'}
+            </span>
+            <span className="text-slate-500">Garrison</span>
+            <span className="text-right font-mono text-slate-300">{selected.troops} troops</span>
+            <span className="text-slate-500">Terrain</span>
+            <span className="text-right capitalize text-slate-300">{selected.terrain}</span>
+            <span className="text-slate-500">Income</span>
+            <span className="text-right font-mono text-yellow-400">+{selected.resources.credits ?? 0}💰/turn</span>
+            <span className="text-slate-500">Unrest</span>
+            <span className="text-right font-mono" style={{ color: selected.unrest > 60 ? '#ef4444' : selected.unrest > 30 ? '#eab308' : '#22c55e' }}>
+              {selected.unrest}%
+            </span>
+            <span className="text-slate-500">Fortification</span>
+            <span className="text-right font-mono text-slate-300">{'▮'.repeat(selected.fortification) || '—'}</span>
+          </div>
+          {selected.buildings.length > 0 && (
+            <div className="px-3 pb-2 flex flex-wrap gap-1">
+              {selected.buildings.map((b, i) => (
+                <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                  {BUILDING_LABELS[b.type] ?? b.type}
+                </span>
+              ))}
+            </div>
+          )}
+          {selected.hasRareMaterials && (
+            <div className="px-3 pb-2">
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400 uppercase tracking-wider">
+                ⚙ Rare Materials
+              </span>
+            </div>
+          )}
+        </motion.div>
+      )}
 
       {/* Reports list */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">

@@ -59,9 +59,12 @@ export interface GameState {
   combatLog: CombatLogEntry[];
   selectedTerritory: string | null;
   saves: SaveSlot[];
+  tutorialStep: number | null; // null = tutorial off, 0..N = current step
   // Actions
   setPhase: (phase: Phase) => void;
   initGame: (faction: FactionId, difficulty: Difficulty) => void;
+  initDemo: () => void;
+  setTutorialStep: (step: number | null) => void;
   selectTerritory: (id: string | null) => void;
   getSaves: () => SaveSlot[];
   saveGame: (slotId: number) => void;
@@ -80,6 +83,8 @@ export interface GameState {
   autoResolveMission: () => void;
   moveUnit: (unitId: string, x: number, y: number) => void;
   attackUnit: (attackerId: string, targetId: string) => void;
+  setUnitOverwatch: (unitId: string) => void;
+  setUnitHunker: (unitId: string) => void;
   endPlayerTurn: () => void;
   endCombat: (result: string) => void;
   deploySpy: (spyId: string, territoryId: string, action: SpyAction) => void;
@@ -120,9 +125,16 @@ export const useGameStore = create<GameState>((set, get) => ({
   currentEvent: null, actionsRemaining: 5, spies: [], newsTicker: [],
   mission: null, grid: [], tacticalUnits: [], combatLog: [],
   selectedTerritory: null, saves: loadSaves(),
+  tutorialStep: null,
 
   setPhase: (phase) => set({ phase }),
   selectTerritory: (id) => set({ selectedTerritory: id }),
+  setTutorialStep: (step) => {
+    if (step === null && typeof window !== 'undefined') {
+      localStorage.setItem('shadowaccord_tutorial_done', '1');
+    }
+    set({ tutorialStep: step });
+  },
 
   initGame: (faction, difficulty) => {
     const territories = createTerritories();
@@ -131,6 +143,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     const operatives = generateStartingRoster(faction);
     const diplomacy = buildInitialDiplomacy();
     const spies = [generateSpy(faction)];
+    // Show the tutorial for first-time commanders
+    const tutorialDone = typeof window !== 'undefined' && localStorage.getItem('shadowaccord_tutorial_done') === '1';
     set({
       phase: 'strategic', turn: 1, playerFaction: faction, difficulty,
       factions, territories, diplomacy, operatives,
@@ -138,6 +152,72 @@ export const useGameStore = create<GameState>((set, get) => ({
       actionsRemaining: 5, spies, newsTicker: [],
       mission: null, grid: [], tacticalUnits: [], combatLog: [],
       selectedTerritory: null,
+      tutorialStep: tutorialDone ? null : 0,
+    });
+  },
+
+  // Demo: seasoned mid-campaign state so new players see the systems alive
+  initDemo: () => {
+    get().initGame('atlantic', 'normal');
+    const { territories, factions, operatives, diplomacy } = get();
+    const t = { ...territories };
+    const f = { ...factions };
+
+    // Atlantic seizes two extra territories with garrisons and buildings
+    for (const tid of ['mexico', 'iberia']) {
+      if (t[tid]) {
+        t[tid] = { ...t[tid], controller: 'atlantic', troops: 12, fortification: 1 };
+        f.atlantic = { ...f.atlantic, territories: [...f.atlantic.territories, tid] };
+      }
+    }
+    if (t['eastern_us']) t['eastern_us'] = { ...t['eastern_us'], buildings: [{ type: 'bank', level: 1 }, { type: 'lab', level: 1 }] };
+    if (t['western_us']) t['western_us'] = { ...t['western_us'], buildings: [{ type: 'recruitCenter', level: 1 }] };
+
+    // Resources, techs, and a research in flight
+    f.atlantic = {
+      ...f.atlantic,
+      resources: { credits: 850, techPoints: 140, influence: 90, rareMaterials: 45, manpower: 130 },
+      researchedTechs: ['mil_t1_firearms', 'eco_t1_markets'],
+      currentResearch: { techId: 'int_t1_signal', turnsRemaining: 1 },
+    };
+
+    // Veteran squad: levels, callsigns, battle history, one wounded
+    const ops = operatives.map((op, i) => {
+      if (i === 0) return { ...op, level: 4, callsign: 'Specter', kills: 7, missionsCompleted: 5, xp: 40, xpToNext: 400, aim: op.aim + 6, maxHp: op.maxHp + 3, hp: op.maxHp + 3 };
+      if (i === 1) return { ...op, level: 3, callsign: 'Viper', kills: 4, missionsCompleted: 4, xp: 10, xpToNext: 300, aim: op.aim + 4, maxHp: op.maxHp + 2, hp: op.maxHp + 2 };
+      if (i === 2) return { ...op, level: 2, kills: 2, missionsCompleted: 2, aim: op.aim + 2, maxHp: op.maxHp + 1, hp: op.maxHp + 1 };
+      if (i === 3) return { ...op, status: 'wounded' as const, woundedTurns: 2, hp: Math.max(1, op.maxHp - 4), missionsCompleted: 1 };
+      return op;
+    });
+
+    // A live diplomatic landscape
+    const relations = { ...diplomacy.relations };
+    relations[relationKey('atlantic', 'eastern')] = -45;
+    relations[relationKey('atlantic', 'freecities')] = 30;
+    relations[relationKey('eastern', 'jade')] = 25;
+    relations[relationKey('solar', 'southern')] = 15;
+
+    set({
+      turn: 6,
+      territories: t,
+      factions: f,
+      operatives: ops,
+      diplomacy: {
+        ...diplomacy,
+        relations,
+        treaties: [{ id: 'demo_treaty', type: 'trade', factions: ['atlantic', 'freecities'], turnsRemaining: null, turnEstablished: 3 }],
+      },
+      newsTicker: [
+        'DEMO CAMPAIGN — Turn 6 of an Atlantic Compact operation',
+        'Eastern Pact denounces Atlantic "aggression" after Iberia falls',
+        'Free Cities sign trade accord with Atlantic Compact',
+        'Analysts warn of Jade Circle military buildup near Korea',
+      ],
+      intelReports: [
+        { id: 'demo_intel_1', turn: 5, source: 'Agent Cobalt', content: 'Ukraine: 20 troops, fortification 1, unrest 12%. The Eastern Pact holds 6 territories.', faction: 'eastern', type: 'troops' },
+        { id: 'demo_intel_2', turn: 4, source: 'SIGINT', content: 'Jade Circle industrial output up 15% this quarter. Factory construction detected in China Coast.', faction: 'jade', type: 'economy' },
+      ],
+      tutorialStep: 0,
     });
   },
 
@@ -483,6 +563,28 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { ...u, position: { x, y }, actionsRemaining: u.actionsRemaining - 1 };
     });
     set({ tacticalUnits: units });
+  },
+
+  setUnitOverwatch: (unitId) => {
+    const { tacticalUnits, mission, combatLog } = get();
+    if (!mission?.playerTurn) return;
+    const unit = tacticalUnits.find(u => u.id === unitId);
+    if (!unit || unit.actionsRemaining < 2) return;
+    set({
+      tacticalUnits: tacticalUnits.map(u => u.id === unitId ? { ...u, isInOverwatch: true, actionsRemaining: 0 } : u),
+      combatLog: [...combatLog, { turn: mission.currentTurn, message: `${unit.name} is on overwatch`, type: 'ability' }],
+    });
+  },
+
+  setUnitHunker: (unitId) => {
+    const { tacticalUnits, mission, combatLog } = get();
+    if (!mission?.playerTurn) return;
+    const unit = tacticalUnits.find(u => u.id === unitId);
+    if (!unit || unit.actionsRemaining < 2) return;
+    set({
+      tacticalUnits: tacticalUnits.map(u => u.id === unitId ? { ...u, isHunkered: true, actionsRemaining: 0 } : u),
+      combatLog: [...combatLog, { turn: mission.currentTurn, message: `${unit.name} hunkers down`, type: 'ability' }],
+    });
   },
 
   attackUnit: (attackerId, targetId) => {

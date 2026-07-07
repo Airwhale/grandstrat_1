@@ -379,6 +379,28 @@ export function processEnemyAI(
       if (tile && tile.type !== 'wall' && tile.type !== 'water' && !occupied) {
         enemy.position = { x: clampedX, y: clampedY };
         log.push({ turn: 0, message: `${enemy.name} moves`, type: 'movement' });
+
+        // Overwatch reaction: the first watching player unit in range fires
+        for (const watcher of players) {
+          if (!watcher.isInOverwatch || watcher.hp <= 0 || enemy.hp <= 0) continue;
+          const wd = Math.abs(watcher.position.x - enemy.position.x) + Math.abs(watcher.position.y - enemy.position.y);
+          if (wd > 8) continue;
+          watcher.isInOverwatch = false;
+          const { hitPercent } = calculateHitChance(watcher, enemy, grid);
+          // Reaction shots are slightly less accurate
+          if (Math.random() * 100 < hitPercent - 10) {
+            const owDmg = Math.max(1, watcher.weaponDamage - enemy.armor);
+            enemy.hp = Math.max(0, enemy.hp - owDmg);
+            log.push({ turn: 0, message: `OVERWATCH: ${watcher.name} hits ${enemy.name} for ${owDmg}`, type: 'hit' });
+            if (enemy.hp <= 0) {
+              log.push({ turn: 0, message: `${enemy.name} eliminated by overwatch!`, type: 'kill' });
+              if (watcher.kills !== undefined) watcher.kills += 1;
+            }
+          } else {
+            log.push({ turn: 0, message: `OVERWATCH: ${watcher.name} misses ${enemy.name}`, type: 'miss' });
+          }
+          break;
+        }
       }
       enemy.actionsRemaining--;
     }
