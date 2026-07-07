@@ -19,9 +19,17 @@ export default function GameOverScreen() {
   const fallenOperatives = useGameStore((s) => s.fallenOperatives);
   const territories = useGameStore((s) => s.territories);
 
+  const victoryType = useGameStore((s) => s.victoryType);
+
   const isVictory = phase === 'victory';
   const accentColor = isVictory ? '#22c55e' : '#ef4444';
   const factionColor = playerFaction ? FACTION_COLORS[playerFaction] : accentColor;
+
+  const victorySubtitle =
+    victoryType === 'domination' ? 'DOMINATION — the world map bears your colors.'
+    : victoryType === 'economic' ? 'ECONOMIC HEGEMONY — you bought the world outright.'
+    : victoryType === 'diplomatic' ? 'DIPLOMATIC TRIUMPH — the blocs answer to your council.'
+    : 'The shadow war is over. You prevailed.';
 
   const stats = useMemo(() => {
     const playerTerritories = Array.isArray(territories)
@@ -93,7 +101,7 @@ export default function GameOverScreen() {
             style={{ color: '#64748b' }}
           >
             {isVictory
-              ? 'The shadow war is over. You prevailed.'
+              ? victorySubtitle
               : 'Your operations have been dismantled.'}
           </p>
         </motion.div>

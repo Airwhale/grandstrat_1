@@ -203,6 +203,9 @@ export interface TacticalUnit {
   abilities: AbilityId[];
   weaponDamage: number;
   kills?: number; // kills scored this mission (player units)
+  abilityCooldowns?: Record<string, number>; // turns until each ability is usable again
+  abilityUses?: Record<string, number>; // remaining uses for limited abilities
+  bondedWith?: string; // operativeId of battle-bonded partner (+5 aim when adjacent)
 }
 
 export interface StatusEffect {
@@ -324,6 +327,16 @@ export interface StrategicAction {
   label: string;
   description: string;
   cost?: Partial<Resources>;
+}
+
+// ===== ECONOMY =====
+
+export interface IncomeBreakdown {
+  territories: number;
+  buildings: number;
+  unrestPenalty: number;
+  techPoints: number;
+  total: number;
 }
 
 // ===== SAVE/LOAD =====

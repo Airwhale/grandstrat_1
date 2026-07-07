@@ -11,7 +11,7 @@ const BUILDING_LABELS: Record<string, string> = {
 };
 
 export default function IntelPanel() {
-  const { intelReports, playerFaction, selectedTerritory, territories, selectTerritory } = useGameStore();
+  const { intelReports, playerFaction, selectedTerritory, territories, selectTerritory, eventHistory } = useGameStore();
 
   const accentColor = playerFaction ? FACTION_COLORS[playerFaction] : '#6B7280';
 
@@ -161,6 +161,23 @@ export default function IntelPanel() {
           })
         )}
       </div>
+
+      {/* Event archive */}
+      {eventHistory.length > 0 && (
+        <div className="shrink-0 border-t max-h-36 overflow-y-auto" style={{ borderColor: `${accentColor}33` }}>
+          <div className="px-3 py-1.5 sticky top-0" style={{ backgroundColor: '#111827' }}>
+            <span className="text-[9px] font-bold uppercase tracking-widest text-gray-500">
+              Event Archive [{eventHistory.length}]
+            </span>
+          </div>
+          {[...eventHistory].reverse().map((ev) => (
+            <div key={ev.id} className="px-3 py-1 flex items-center gap-2 border-b border-gray-800/40">
+              <span className="text-[9px] font-mono text-gray-600 shrink-0">T{ev.turn}</span>
+              <span className="text-[10px] text-gray-400 truncate">{ev.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Footer classification bar */}
       <div

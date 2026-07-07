@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { FACTION_COLORS } from '@/data/factions';
 import { getAvailableTechs } from '@/data/technologies';
 import Tooltip, { CostLine } from '@/components/ui/Tooltip';
+import { sfx } from '@/utils/sound';
 import type {
   StrategicActionType,
   Territory,
@@ -172,8 +173,18 @@ export default function ActionPanel() {
     setSelectedSpyId(null);
   }, []);
 
+  // Esc cancels the open sub-panel
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') resetMode();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [resetMode]);
+
   function handleActionClick(action: ActionDef) {
     if (actionsRemaining <= 0) return;
+    sfx.click();
 
     // Diplomacy navigates directly
     if (action.type === 'diplomacy') {

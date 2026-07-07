@@ -20,6 +20,7 @@ import type {
   BuildingType,
   OperativeClass,
   DiplomaticAction,
+  IncomeBreakdown,
 } from '@/types';
 import { createTerritories } from '@/data/territories';
 import { createFaction, FACTION_NAMES } from '@/data/factions';
@@ -31,8 +32,10 @@ import {
   calculateIncome, calculateTechIncome,
   BUILDING_COSTS, DIPLOMACY_COSTS, DIPLOMACY_RELATION_CHANGES,
   autoResolveCombat, generateAINews, generateSpy,
-  setupTacticalCombat, calculateHitChance, processEnemyAI,
+  setupTacticalCombat, calculateHitChance, processEnemyAI, spawnEnemyWave,
 } from './helpers';
+import { executeAbility } from './abilities';
+import { sfx } from '@/utils/sound';
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -60,6 +63,11 @@ export interface GameState {
   selectedTerritory: string | null;
   saves: SaveSlot[];
   tutorialStep: number | null; // null = tutorial off, 0..N = current step
+  eventHistory: GameEvent[];
+  incomeBreakdown: IncomeBreakdown | null;
+  diplomaticStreak: number; // consecutive turns holding 3+ alliances with 15+ territories
+  victoryType: 'domination' | 'economic' | 'diplomatic' | null;
+  coalitionActive: boolean;
   // Actions
   setPhase: (phase: Phase) => void;
   initGame: (faction: FactionId, difficulty: Difficulty) => void;
@@ -83,6 +91,7 @@ export interface GameState {
   autoResolveMission: () => void;
   moveUnit: (unitId: string, x: number, y: number) => void;
   attackUnit: (attackerId: string, targetId: string) => void;
+  useAbility: (unitId: string, abilityId: string, targetX?: number, targetY?: number) => void;
   setUnitOverwatch: (unitId: string) => void;
   setUnitHunker: (unitId: string) => void;
   endPlayerTurn: () => void;
@@ -126,6 +135,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   mission: null, grid: [], tacticalUnits: [], combatLog: [],
   selectedTerritory: null, saves: loadSaves(),
   tutorialStep: null,
+  eventHistory: [], incomeBreakdown: null, diplomaticStreak: 0,
+  victoryType: null, coalitionActive: false,
 
   setPhase: (phase) => set({ phase }),
   selectTerritory: (id) => set({ selectedTerritory: id }),
@@ -153,6 +164,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       mission: null, grid: [], tacticalUnits: [], combatLog: [],
       selectedTerritory: null,
       tutorialStep: tutorialDone ? null : 0,
+      eventHistory: [], incomeBreakdown: null, diplomaticStreak: 0,
+      victoryType: null, coalitionActive: false,
     });
   },
 
@@ -225,6 +238,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   getSaves: () => { const s = loadSaves(); set({ saves: s }); return s; },
   saveGame: (slotId) => {
     const st = get();
+    // Ironman: one save, no take-backs — only the autosave slot is allowed
+    if (st.difficulty === 'ironman' && slotId !== 0) return;
     const slot: SaveSlot = {
       id: slotId,
       name: `Turn ${st.turn} - ${st.playerFaction ? FACTION_NAMES[st.playerFaction] : 'Unknown'}`,
@@ -235,6 +250,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         factions: st.factions, territories: st.territories, diplomacy: st.diplomacy,
         operatives: st.operatives, fallenOperatives: st.fallenOperatives,
         intelReports: st.intelReports, spies: st.spies, actionsRemaining: st.actionsRemaining,
+        eventHistory: st.eventHistory, diplomaticStreak: st.diplomaticStreak,
+        coalitionActive: st.coalitionActive,
       }),
     };
     const saves = loadSaves().filter((s) => s.id !== slotId);
@@ -287,6 +304,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         updatedFactions[oldController] = { ...updatedFactions[oldController], territories: updatedFactions[oldController].territories.filter(t => t !== toId) };
         if (updatedFactions[oldController].territories.length === 0) updatedFactions[oldController] = { ...updatedFactions[oldController], isDefeated: true };
       }
+      sfx.capture();
       set({ territories: updatedTerritories, factions: updatedFactions, actionsRemaining: actionsRemaining - 1,
         newsTicker: [...newsTicker, `Your forces captured ${to.name}!`],
       });
@@ -377,10 +395,12 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   resolveEvent: (choiceId) => {
-    const { currentEvent, factions, playerFaction } = get();
+    const { currentEvent, factions, playerFaction, eventHistory } = get();
     if (!currentEvent || !playerFaction) return;
+    sfx.confirm();
     const choice = currentEvent.choices.find(c => c.id === choiceId);
-    if (!choice) { set({ currentEvent: null, phase: 'strategic' }); return; }
+    const archived = [...eventHistory, { ...currentEvent, resolved: true }];
+    if (!choice) { set({ currentEvent: null, phase: 'strategic', eventHistory: archived }); return; }
     const f = { ...factions[playerFaction] };
     const r = { ...f.resources };
     for (const effect of choice.effects) {
@@ -396,7 +416,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     }
     f.resources = r;
-    set({ currentEvent: null, phase: 'strategic', factions: { ...factions, [playerFaction]: f } });
+    set({ currentEvent: null, phase: 'strategic', factions: { ...factions, [playerFaction]: f }, eventHistory: archived });
   },
 
   // ---- End Turn ----
@@ -429,50 +449,113 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     }
 
-    // 3. AI turns
+    // 3. Coalition check — if the player is running away with the game,
+    //    the AI factions close ranks against them.
+    const relations = { ...state.diplomacy.relations };
+    const playerTerritoryCount = factions[state.playerFaction].territories.length;
+    const biggestAI = Math.max(...FACTION_IDS.filter(f => f !== state.playerFaction).map(f => factions[f].territories.length));
+    const coalitionNow = playerTerritoryCount >= 12 && playerTerritoryCount > biggestAI;
+    if (coalitionNow) {
+      for (const a of FACTION_IDS) {
+        if (a === state.playerFaction || factions[a].isDefeated) continue;
+        // AI factions warm to each other, cool sharply toward the player
+        const pk = relationKey(state.playerFaction, a);
+        relations[pk] = Math.max(-100, (relations[pk] ?? 0) - 4);
+        for (const b of FACTION_IDS) {
+          if (b === state.playerFaction || b === a || factions[b].isDefeated) continue;
+          const k = relationKey(a, b);
+          relations[k] = Math.min(100, (relations[k] ?? 0) + 3);
+        }
+      }
+      if (!state.coalitionActive) {
+        ticker.push('⚠ COALITION FORMING: rival blocs are coordinating against your expansion');
+      }
+    }
+
+    // 4. AI turns — driven by faction personality
     for (const fid of FACTION_IDS) {
       if (fid === state.playerFaction || factions[fid].isDefeated) continue;
       const aiFaction: Faction = factions[fid];
-      const aiActions = 1 + Math.floor(Math.random() * 2);
+      const p = aiFaction.personality;
+      const aiActions = 1 + Math.floor(Math.random() * 2) + (p.ambition >= 8 ? 1 : 0);
+
       for (let i = 0; i < aiActions; i++) {
+        const attackChance = 0.15 + p.aggression * 0.04 + (coalitionNow ? 0.15 : 0);
+        const buildChance = attackChance + 0.1 + p.greed * 0.03;
         const roll = Math.random();
-        if (roll < 0.3 && aiFaction.territories.length > 0) {
+
+        if (roll < attackChance && aiFaction.territories.length > 0) {
+          // ATTACK: paranoid factions need bigger garrisons before committing
+          const minTroops = 8 + p.paranoia;
+          const candidates: Array<{ fromTid: string; toTid: string }> = [];
+          for (const fromTid of aiFaction.territories) {
+            const fromT: Territory | undefined = territories[fromTid];
+            if (!fromT || fromT.troops < minTroops) continue;
+            for (const adjId of fromT.adjacency) {
+              const adj = territories[adjId];
+              if (!adj || adj.controller === fid) continue;
+              // Ambitious factions also grab neutrals; others hit rivals
+              if (adj.controller === null && p.ambition < 5) continue;
+              // Coalition: strongly prefer player territories
+              if (coalitionNow && adj.controller !== state.playerFaction && Math.random() < 0.7) continue;
+              // Respect treaties (mostly) — loyal factions honor pacts
+              if (adj.controller) {
+                const hasPact = state.diplomacy.treaties.some(t =>
+                  t.factions.includes(fid) && t.factions.includes(adj.controller as FactionId));
+                if (hasPact && Math.random() < p.loyalty / 10) continue;
+              }
+              candidates.push({ fromTid, toTid: adjId });
+            }
+          }
+          if (candidates.length > 0) {
+            const { fromTid, toTid } = candidates[Math.floor(Math.random() * candidates.length)];
+            const fromT = territories[fromTid];
+            const to = territories[toTid];
+            const result = autoResolveCombat(fromT.troops, to.troops, to.fortification);
+            territories[fromTid] = { ...fromT, troops: Math.max(1, fromT.troops - result.attackerLosses) };
+            if (result.attackerWins) {
+              const oldCtrl: FactionId | null = to.controller;
+              territories[toTid] = { ...to, controller: fid, troops: Math.max(1, fromT.troops - result.attackerLosses - 2) };
+              factions[fid] = { ...factions[fid], territories: [...factions[fid].territories, toTid] };
+              if (oldCtrl) {
+                factions[oldCtrl] = { ...factions[oldCtrl], territories: factions[oldCtrl].territories.filter((t: string) => t !== toTid) };
+                if (factions[oldCtrl].territories.length === 0) factions[oldCtrl] = { ...factions[oldCtrl], isDefeated: true };
+                const rk = relationKey(fid, oldCtrl);
+                relations[rk] = Math.max(-100, (relations[rk] ?? 0) - 20);
+              }
+              ticker.push(`${FACTION_NAMES[fid]} captured ${to.name}${oldCtrl === state.playerFaction ? ' FROM YOU' : ''}!`);
+            } else {
+              territories[toTid] = { ...to, troops: Math.max(1, to.troops - result.defenderLosses) };
+              ticker.push(`${FACTION_NAMES[fid]} attack on ${to.name} repelled`);
+            }
+          }
+        } else if (roll < buildChance && aiFaction.territories.length > 0) {
+          // BUILD/REINFORCE: greedy factions convert credits into strength
+          const f = factions[fid];
+          if (f.resources.credits >= 50) {
+            const tid = aiFaction.territories[Math.floor(Math.random() * aiFaction.territories.length)];
+            const t = territories[tid];
+            if (t) {
+              const newTroops = Math.min(10, Math.floor(f.resources.credits / 10));
+              territories[tid] = { ...t, troops: t.troops + newTroops };
+              factions[fid] = { ...f, resources: { ...f.resources, credits: f.resources.credits - newTroops * 10 } };
+            }
+          }
+        } else if (aiFaction.territories.length > 0) {
+          // REDEPLOY: paranoid factions mass troops on hostile borders
           const fromTid: string = aiFaction.territories[Math.floor(Math.random() * aiFaction.territories.length)];
           const fromT: Territory | undefined = territories[fromTid];
           if (fromT && fromT.troops > 5) {
             const adjOwned: string[] = fromT.adjacency.filter((a: string) => territories[a]?.controller === fid);
-            if (adjOwned.length > 0) {
-              const toTid: string = adjOwned[Math.floor(Math.random() * adjOwned.length)];
+            // Prefer moving toward contested borders
+            const border: string[] = adjOwned.filter((a: string) =>
+              territories[a]?.adjacency.some((x: string): boolean => Boolean(territories[x]?.controller && territories[x]?.controller !== fid)));
+            const pool: string[] = (p.paranoia >= 6 && border.length > 0) ? border : adjOwned;
+            if (pool.length > 0) {
+              const toTid: string = pool[Math.floor(Math.random() * pool.length)];
               const move = Math.floor(fromT.troops * 0.3);
               territories[fromTid] = { ...fromT, troops: fromT.troops - move };
               territories[toTid] = { ...territories[toTid], troops: territories[toTid].troops + move };
-            }
-          }
-        } else if (roll < 0.5 && aiFaction.territories.length > 0) {
-          const fromTid: string = aiFaction.territories[Math.floor(Math.random() * aiFaction.territories.length)];
-          const fromT: Territory | undefined = territories[fromTid];
-          if (fromT && fromT.troops > 10) {
-            const targets: string[] = fromT.adjacency.filter((a: string) => territories[a]?.controller !== fid && territories[a]?.controller !== null);
-            if (targets.length > 0) {
-              const toTid: string = targets[Math.floor(Math.random() * targets.length)];
-              const to: Territory | undefined = territories[toTid];
-              if (to) {
-                const result = autoResolveCombat(fromT.troops, to.troops, to.fortification);
-                territories[fromTid] = { ...fromT, troops: Math.max(1, fromT.troops - result.attackerLosses) };
-                if (result.attackerWins) {
-                  const oldCtrl: FactionId | null = to.controller;
-                  territories[toTid] = { ...to, controller: fid, troops: Math.max(1, fromT.troops - result.attackerLosses - 2) };
-                  factions[fid] = { ...factions[fid], territories: [...factions[fid].territories, toTid] };
-                  if (oldCtrl) {
-                    factions[oldCtrl] = { ...factions[oldCtrl], territories: factions[oldCtrl].territories.filter((t: string) => t !== toTid) };
-                    if (factions[oldCtrl].territories.length === 0) factions[oldCtrl] = { ...factions[oldCtrl], isDefeated: true };
-                  }
-                  ticker.push(`${FACTION_NAMES[fid]} captured ${to.name}!`);
-                } else {
-                  territories[toTid] = { ...to, troops: Math.max(1, to.troops - result.defenderLosses) };
-                  ticker.push(`${FACTION_NAMES[fid]} attack on ${to.name} repelled`);
-                }
-              }
             }
           }
         }
@@ -493,24 +576,92 @@ export const useGameStore = create<GameState>((set, get) => ({
       return t.turnsRemaining > 1;
     }).map(t => t.turnsRemaining !== null ? { ...t, turnsRemaining: t.turnsRemaining - 1 } : t);
 
-    // 6. Events every 3 turns
+    // 6. Player income ledger (for the credits tooltip)
+    const pf = factions[state.playerFaction];
+    let ledgerTerritories = 0, ledgerBuildings = 0, ledgerUnrest = 0;
+    for (const tid of pf.territories) {
+      const t = territories[tid];
+      if (!t) continue;
+      ledgerTerritories += t.resources.credits ?? 0;
+      for (const b of t.buildings) {
+        if (b.type === 'bank') ledgerBuildings += 15 * b.level;
+        if (b.type === 'factory') ledgerBuildings += 10 * b.level;
+      }
+      if (t.unrest > 50) ledgerUnrest -= Math.floor((t.unrest - 50) * 0.3);
+    }
+    const incomeBreakdown: IncomeBreakdown = {
+      territories: ledgerTerritories,
+      buildings: ledgerBuildings,
+      unrestPenalty: ledgerUnrest,
+      techPoints: calculateTechIncome(pf, territories),
+      total: Math.max(0, ledgerTerritories + ledgerBuildings + ledgerUnrest),
+    };
+
+    // 7. Events every 3 turns — and they hit the AI factions too
     const newTurn = state.turn + 1;
     let event: GameEvent | null = null;
     let newPhase: Phase = 'strategic';
     if (newTurn % 3 === 0) {
       event = generateEvent(newTurn, state.playerFaction);
       newPhase = 'event';
+      // A random AI faction feels the same shockwave
+      const aiTargets = FACTION_IDS.filter(f => f !== state.playerFaction && !factions[f].isDefeated);
+      if (aiTargets.length > 0) {
+        const victim = aiTargets[Math.floor(Math.random() * aiTargets.length)];
+        const swing = Math.random() < 0.5 ? -60 : 40;
+        factions[victim] = { ...factions[victim], resources: { ...factions[victim].resources, credits: Math.max(0, factions[victim].resources.credits + swing) } };
+        ticker.push(`${FACTION_NAMES[victim]} ${swing < 0 ? 'hit hard by' : 'profits from'} the crisis`);
+      }
+      sfx.event();
     }
 
-    // 7. Check victory/defeat
+    // 8. Victory / defeat checks
     const playerF = factions[state.playerFaction];
-    if (playerF.territories.length === 0 || playerF.isDefeated) newPhase = 'gameover';
-    if (playerF.territories.length >= 30) newPhase = 'victory';
+    let victoryType: GameState['victoryType'] = state.victoryType;
+    let diplomaticStreak = state.diplomaticStreak;
+
+    // Diplomatic: 3+ alliance treaties while holding 15+ territories, 12 turns straight
+    const pfId: FactionId = state.playerFaction;
+    const allianceCount = new Set(
+      treaties
+        .filter(t => (t.type === 'defensiveAlliance' || t.type === 'fullAlliance') && t.factions.includes(pfId))
+        .map(t => t.factions.find(f => f !== pfId))
+    ).size;
+    if (allianceCount >= 3 && playerF.territories.length >= 15) {
+      diplomaticStreak += 1;
+    } else {
+      diplomaticStreak = 0;
+    }
+
+    if (playerF.territories.length === 0 || playerF.isDefeated) {
+      newPhase = 'gameover';
+    } else if (operatives.filter(o => o.faction === state.playerFaction).length === 0 && playerF.resources.credits < 50) {
+      // No operatives left and can't afford to recruit — the shadow war is lost
+      ticker.push('Your last operative is gone and the coffers are empty. The council dissolves.');
+      newPhase = 'gameover';
+    } else if (playerF.territories.length >= 30) {
+      newPhase = 'victory'; victoryType = 'domination';
+    } else if (playerF.resources.credits >= 10000) {
+      newPhase = 'victory'; victoryType = 'economic';
+    } else if (diplomaticStreak >= 12) {
+      newPhase = 'victory'; victoryType = 'diplomatic';
+    }
+
+    if (newPhase === 'victory') sfx.victory();
+    else if (newPhase === 'gameover') sfx.defeat();
+    else sfx.endTurn();
+
+    // Diplomatic-victory progress nudge
+    if (diplomaticStreak > 0 && diplomaticStreak % 4 === 0 && newPhase === 'strategic') {
+      ticker.push(`Diplomatic victory progress: ${diplomaticStreak}/12 turns of sustained alliances`);
+    }
 
     set({
       turn: newTurn, actionsRemaining: 5, territories, factions, operatives,
-      diplomacy: { ...state.diplomacy, treaties },
+      diplomacy: { ...state.diplomacy, treaties, relations },
       newsTicker: ticker, currentEvent: event, phase: newPhase,
+      incomeBreakdown, diplomaticStreak, victoryType,
+      coalitionActive: coalitionNow,
     });
 
     // Autosave
@@ -523,7 +674,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (!playerFaction) return;
     const from = territories[fromId], to = territories[toId];
     if (!from || !to) return;
-    const { grid, units, mission } = setupTacticalCombat(to.terrain, playerFaction, operatives, to.troops);
+    // Covert ops draw from the full mission pool
+    const types = ['assault', 'extraction', 'defense'] as const;
+    const missionType = types[Math.floor(Math.random() * types.length)];
+    const { grid, units, mission } = setupTacticalCombat(to.terrain, playerFaction, operatives, to.troops, missionType);
     if (!units.some(u => u.isPlayer)) {
       set({ newsTicker: [...newsTicker, 'No active operatives available for deployment. Recruit or heal your roster.'] });
       return;
@@ -556,13 +710,55 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   moveUnit: (unitId, x, y) => {
-    const { tacticalUnits, mission } = get();
+    const { tacticalUnits, mission, combatLog } = get();
     if (!mission?.playerTurn) return;
     const units = tacticalUnits.map(u => {
       if (u.id !== unitId || u.actionsRemaining < 1) return u;
       return { ...u, position: { x, y }, actionsRemaining: u.actionsRemaining - 1 };
     });
-    set({ tacticalUnits: units });
+
+    // Extraction: reaching the objective tile wins the mission
+    let newMission = mission;
+    let newLog = combatLog;
+    const reachObj = mission.objectives.find(o => o.type === 'reach' && !o.isComplete);
+    if (reachObj?.targetPosition && reachObj.targetPosition.x === x && reachObj.targetPosition.y === y) {
+      const mover = units.find(u => u.id === unitId);
+      if (mover?.isPlayer) {
+        newMission = {
+          ...mission,
+          isComplete: true,
+          result: 'victory',
+          objectives: mission.objectives.map(o => o.id === reachObj.id ? { ...o, isComplete: true } : o),
+        };
+        newLog = [...combatLog, { turn: mission.currentTurn, message: `${mover.name} reached the extraction zone — MISSION COMPLETE`, type: 'system' }];
+        sfx.capture();
+      }
+    }
+    set({ tacticalUnits: units, mission: newMission, combatLog: newLog });
+  },
+
+  useAbility: (unitId, abilityId, targetX, targetY) => {
+    const { tacticalUnits, grid, combatLog, mission } = get();
+    if (!mission?.playerTurn || mission.isComplete) return;
+    const target = targetX !== undefined && targetY !== undefined ? { x: targetX, y: targetY } : null;
+    const result = executeAbility(tacticalUnits, grid, unitId, abilityId, target, mission.currentTurn);
+    if (!result.ok) return;
+
+    if (result.sound === 'explosion') sfx.explosion();
+    else if (result.sound === 'heal') sfx.heal();
+    else if (result.sound === 'cloak') sfx.cloak();
+    else if (result.sound === 'shot') sfx.shot();
+    else if (result.sound === 'kill') sfx.kill();
+    else sfx.confirm();
+
+    // Ability kills can complete the mission
+    const enemiesAlive = result.units.filter(u => !u.isPlayer && u.hp > 0);
+    let newMission = { ...mission };
+    if (mission.type === 'assault' && enemiesAlive.length === 0) {
+      newMission = { ...newMission, isComplete: true, result: 'victory', objectives: newMission.objectives.map(o => ({ ...o, isComplete: true })) };
+      result.log.push({ turn: mission.currentTurn, message: 'MISSION COMPLETE - VICTORY', type: 'system' });
+    }
+    set({ tacticalUnits: result.units, grid: result.grid, combatLog: [...combatLog, ...result.log], mission: newMission });
   },
 
   setUnitOverwatch: (unitId) => {
@@ -594,24 +790,32 @@ export const useGameStore = create<GameState>((set, get) => ({
     const target = tacticalUnits.find(u => u.id === targetId);
     if (!attacker || !target || attacker.actionsRemaining < 1) return;
 
-    const { hitPercent, critPercent } = calculateHitChance(attacker, target, grid);
-    const roll = Math.random() * 100;
+    // Ambush passive: attacking from cloak is a guaranteed crit (and breaks cloak)
+    const fromCloak = attacker.isCloaked;
+    const { hitPercent, critPercent } = calculateHitChance(attacker, target, grid, tacticalUnits);
+    const roll = fromCloak ? 0 : Math.random() * 100;
     const newLog = [...combatLog];
-    let updatedUnits = tacticalUnits.map(u => u.id === attackerId ? { ...u, actionsRemaining: u.actionsRemaining - 1 } : u);
+    let updatedUnits = tacticalUnits.map(u => u.id === attackerId
+      ? { ...u, actionsRemaining: u.actionsRemaining - 1, isCloaked: false, statusEffects: u.statusEffects.filter(se => se.type !== 'cloak') }
+      : u);
+    sfx.shot();
 
     if (roll < hitPercent) {
-      const isCrit = Math.random() * 100 < critPercent;
+      const isCrit = fromCloak || Math.random() * 100 < critPercent;
       let dmg = Math.max(1, attacker.weaponDamage - target.armor);
       if (isCrit) dmg = Math.floor(dmg * 1.5);
       updatedUnits = updatedUnits.map(u => u.id === targetId ? { ...u, hp: Math.max(0, u.hp - dmg) } : u);
       const hitTarget = updatedUnits.find(u => u.id === targetId)!;
       if (isCrit) {
-        newLog.push({ turn: mission.currentTurn, message: `CRIT! ${attacker.name} hits ${target.name} for ${dmg}`, type: 'crit' });
+        newLog.push({ turn: mission.currentTurn, message: `${fromCloak ? 'AMBUSH! ' : 'CRIT! '}${attacker.name} hits ${target.name} for ${dmg}`, type: 'crit' });
+        sfx.crit();
       } else {
         newLog.push({ turn: mission.currentTurn, message: `${attacker.name} hits ${target.name} for ${dmg}`, type: 'hit' });
+        sfx.hit();
       }
       if (hitTarget.hp <= 0) {
         newLog.push({ turn: mission.currentTurn, message: `${target.name} eliminated!`, type: 'kill' });
+        sfx.kill();
         if (attacker.isPlayer) {
           updatedUnits = updatedUnits.map(u => u.id === attackerId ? { ...u, kills: (u.kills ?? 0) + 1 } : u);
         }
@@ -622,16 +826,18 @@ export const useGameStore = create<GameState>((set, get) => ({
         const grazeDmg = Math.max(1, Math.floor(attacker.weaponDamage * 0.5) - target.armor);
         updatedUnits = updatedUnits.map(u => u.id === targetId ? { ...u, hp: Math.max(0, u.hp - grazeDmg) } : u);
         newLog.push({ turn: mission.currentTurn, message: `${attacker.name} grazes ${target.name} for ${grazeDmg}`, type: 'graze' });
+        sfx.hit();
       } else {
         newLog.push({ turn: mission.currentTurn, message: `${attacker.name} misses ${target.name}`, type: 'miss' });
+        sfx.miss();
       }
     }
 
-    // Check mission completion
+    // Check mission completion (kill-based only for assault; extraction/defense end elsewhere)
     const enemiesAlive = updatedUnits.filter(u => !u.isPlayer && u.hp > 0);
     const playersAlive = updatedUnits.filter(u => u.isPlayer && u.hp > 0);
     let updatedMission = { ...mission };
-    if (enemiesAlive.length === 0) {
+    if (enemiesAlive.length === 0 && mission.type === 'assault') {
       updatedMission = { ...updatedMission, isComplete: true, result: 'victory', objectives: updatedMission.objectives.map(o => ({ ...o, isComplete: true })) };
       newLog.push({ turn: mission.currentTurn, message: 'MISSION COMPLETE - VICTORY', type: 'system' });
     } else if (playersAlive.length === 0) {
@@ -644,24 +850,52 @@ export const useGameStore = create<GameState>((set, get) => ({
   endPlayerTurn: () => {
     const { tacticalUnits, grid, combatLog, mission } = get();
     if (!mission || !mission.playerTurn) return;
+    sfx.endTurn();
 
     // Enemy AI
     const { units: aiUnits, log: aiLog } = processEnemyAI(tacticalUnits, grid);
     const newLog = [...combatLog, ...aiLog.map(l => ({ ...l, turn: mission.currentTurn }))];
 
     // Reset player actions
-    const resetUnits = aiUnits.map(u => u.isPlayer ? { ...u, actionsRemaining: u.maxActions, isInOverwatch: false, isHunkered: false } : u);
+    let resetUnits = aiUnits.map(u => u.isPlayer ? { ...u, actionsRemaining: u.maxActions, isInOverwatch: false, isHunkered: false } : u);
+
+    const nextTurn = mission.currentTurn + 1;
+    let newMission = { ...mission, currentTurn: nextTurn, playerTurn: true };
+
+    // Defense missions: reinforcement waves every 2 turns, survive counter
+    if (mission.type === 'defense') {
+      const surviveObj = newMission.objectives.find(o => o.type === 'survive');
+      if (surviveObj) {
+        const held = (surviveObj.turnsHeld ?? 0) + 1;
+        newMission = {
+          ...newMission,
+          objectives: newMission.objectives.map(o => o.type === 'survive'
+            ? { ...o, turnsHeld: held, description: `Survive ${o.turnsRequired} turns — held ${held}/${o.turnsRequired}` }
+            : o),
+        };
+        if (held >= (surviveObj.turnsRequired ?? 6)) {
+          newMission = { ...newMission, isComplete: true, result: 'victory', objectives: newMission.objectives.map(o => ({ ...o, isComplete: true })) };
+          newLog.push({ turn: nextTurn, message: 'Reinforcement window closed — POSITION HELD', type: 'system' });
+        } else if (nextTurn % 2 === 0) {
+          const { units: withWave, spawned } = spawnEnemyWave(resetUnits, grid, 2 + Math.floor(Math.random() * 2));
+          resetUnits = withWave;
+          newLog.push({ turn: nextTurn, message: `Enemy reinforcements: ${spawned} hostiles inbound from the south`, type: 'system' });
+        }
+      }
+    }
 
     // Check completion
     const enemiesAlive = resetUnits.filter(u => !u.isPlayer && u.hp > 0);
     const playersAlive = resetUnits.filter(u => u.isPlayer && u.hp > 0);
-    let newMission = { ...mission, currentTurn: mission.currentTurn + 1, playerTurn: true };
-    if (enemiesAlive.length === 0) {
-      newMission = { ...newMission, isComplete: true, result: 'victory', objectives: newMission.objectives.map(o => ({ ...o, isComplete: true })) };
-    } else if (playersAlive.length === 0) {
-      newMission = { ...newMission, isComplete: true, result: 'defeat' };
-    } else if (newMission.turnLimit && newMission.currentTurn > newMission.turnLimit) {
-      newMission = { ...newMission, isComplete: true, result: 'defeat' };
+    if (!newMission.isComplete) {
+      if (enemiesAlive.length === 0 && mission.type === 'assault') {
+        newMission = { ...newMission, isComplete: true, result: 'victory', objectives: newMission.objectives.map(o => ({ ...o, isComplete: true })) };
+      } else if (playersAlive.length === 0) {
+        newMission = { ...newMission, isComplete: true, result: 'defeat' };
+      } else if (newMission.turnLimit && newMission.currentTurn > newMission.turnLimit) {
+        newMission = { ...newMission, isComplete: true, result: 'defeat' };
+        newLog.push({ turn: nextTurn, message: mission.type === 'extraction' ? 'Extraction window closed — MISSION FAILED' : 'Out of time — MISSION FAILED', type: 'system' });
+      }
     }
     set({ tacticalUnits: resetUnits, combatLog: newLog, mission: newMission });
   },
@@ -722,6 +956,25 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     }
 
+    // ---- Battle bonds: two most seasoned unbonded survivors pair up after a win ----
+    if (result === 'victory') {
+      const survivorIds = tacticalUnits
+        .filter(u => u.isPlayer && u.operativeId && u.hp > 0)
+        .map(u => u.operativeId as string);
+      const unbonded = updatedOperatives
+        .filter(o => survivorIds.includes(o.id) && !o.bondedWith)
+        .sort((a, b) => b.missionsCompleted - a.missionsCompleted);
+      if (unbonded.length >= 2 && Math.random() < 0.5) {
+        const [a, b] = unbonded;
+        updatedOperatives = updatedOperatives.map(o => {
+          if (o.id === a.id) return { ...o, bondedWith: b.id, bondLevel: o.bondLevel + 1 };
+          if (o.id === b.id) return { ...o, bondedWith: a.id, bondLevel: o.bondLevel + 1 };
+          return o;
+        });
+        ticker.push(`${a.name} and ${b.name} have formed a battle bond (+5 aim when adjacent).`);
+      }
+    }
+
     if (result === 'victory' && tid && territories[tid]) {
       const oldCtrl = territories[tid].controller;
       updatedTerritories[tid] = { ...territories[tid], controller: playerFaction, troops: 5, fortification: 0 };
@@ -730,6 +983,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         updatedFactions[oldCtrl] = { ...updatedFactions[oldCtrl], territories: updatedFactions[oldCtrl].territories.filter(t => t !== tid) };
       }
       ticker.push(`Mission success: captured ${territories[tid].name}`);
+      sfx.capture();
     } else {
       ticker.push(`Mission ${result}: operatives returning to base`);
     }

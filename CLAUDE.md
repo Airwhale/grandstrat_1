@@ -35,18 +35,24 @@
 - page.tsx renders GameLayout, layout.tsx has dark theme
 - Build succeeds with zero errors
 
-### What Could Still Be Improved (Phase 4 Polish)
-- Operative abilities in tactical combat (currently only basic move/attack)
-- Espionage system (spy deployment/actions screen)
-- More sophisticated AI (currently random; should use personality traits)
-- Sound effects and music
-- Tutorial/first-turn guidance
-- Operative bond system
-- Mission type variety (currently only 'assault')
-- More map templates for tactical combat
-- Trade route system
-- Ironman mode enforcement
-- Victory condition checks beyond territory count
+### Phase 4 COMPLETE (July 2026)
+- Class abilities in tactical combat (`src/store/abilities.ts`): heal, rockets w/ cover destruction, cloak+ambush, suppress, hack/stun, bribe/convert, smoke, breach, stims — AP costs, cooldowns, limited uses, purple targeting UI
+- Espionage (gather intel / sabotage / incite unrest with detection risk)
+- Personality-driven strategic AI + COALITION mechanic (player leads → AI gangs up)
+- Procedural Web Audio SFX (`src/utils/sound.ts`) + mute toggle in TopBar
+- Tutorial overlay (7 steps) + Quick Demo mode (turn-6 seeded campaign)
+- Battle bonds (+5 aim adjacent, formed after shared victories)
+- Mission types: assault, extraction (reach gold tile, 10-turn limit), defense (survive 6 turns vs waves)
+- Victory: domination (30 terr) / economic (10k credits) / diplomatic (3 allies × 12 turns); defeat incl. roster+treasury wipe
+- Ironman: autosave only, manual slots hidden
+- Income ledger tooltip on credits; event archive in IntelPanel; region blobs+labels on map; Esc/E shortcuts
+- CI: `.github/workflows/deploy-pages.yml` builds and deploys Pages from THIS branch on every push (basePath /grandstrat_1)
+
+### Remaining ideas (Phase 5?)
+- More map templates per terrain; sabotage/rescue/assassination mission types
+- Trade route income; UN resolutions; proxy war interventions
+- Operative traits at level-up; equipment loadouts
+- Music/ambience layer; richer combat animations
 
 ### Architecture Notes
 - **State**: All game state in Zustand store with localStorage persistence

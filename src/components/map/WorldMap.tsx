@@ -109,6 +109,24 @@ export default function WorldMap() {
     return set;
   }, [territoryList, territories, playerFaction]);
 
+  /** Soft region blobs suggesting continents behind the node graph */
+  const regionBlobs = useMemo(() => {
+    const byRegion = new Map<string, { x: number; y: number }[]>();
+    for (const t of territoryList) {
+      if (t.region === 'City-States') continue;
+      const arr = byRegion.get(t.region) ?? [];
+      arr.push(t.position);
+      byRegion.set(t.region, arr);
+    }
+    return Array.from(byRegion.entries()).map(([region, pts]) => {
+      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+      const rx = Math.max(5, Math.max(...pts.map(p => Math.abs(p.x - cx))) + 4);
+      const ry = Math.max(4, Math.max(...pts.map(p => Math.abs(p.y - cy))) + 4);
+      return { region, cx, cy, rx, ry };
+    });
+  }, [territoryList]);
+
   /** Adjacency edges (deduplicated) */
   const edges = useMemo(() => {
     const seen = new Set<string>();
@@ -192,6 +210,28 @@ export default function WorldMap() {
         className="relative w-full h-full origin-center transition-transform duration-200 ease-out"
         style={{ transform: `scale(${zoom})` }}
       >
+        {/* Soft landmass blobs + region labels for geographic readability */}
+        {regionBlobs.map((b) => (
+          <div key={b.region} className="absolute pointer-events-none" style={{ left: 0, top: 0, width: '100%', height: '100%' }}>
+            <div
+              className="absolute rounded-[50%]"
+              style={{
+                left: `${b.cx - b.rx}%`,
+                top: `${b.cy - b.ry}%`,
+                width: `${b.rx * 2}%`,
+                height: `${b.ry * 2}%`,
+                background: 'radial-gradient(ellipse at center, rgba(148,163,184,0.08) 0%, rgba(148,163,184,0.035) 55%, transparent 78%)',
+              }}
+            />
+            <span
+              className="absolute text-[9px] uppercase tracking-[0.35em] font-semibold whitespace-nowrap -translate-x-1/2"
+              style={{ left: `${b.cx}%`, top: `${b.cy - b.ry - 1.5}%`, color: 'rgba(148,163,184,0.22)' }}
+            >
+              {b.region}
+            </span>
+          </div>
+        ))}
+
         {/* SVG lines layer */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none">
           <defs>

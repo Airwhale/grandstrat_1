@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { FACTION_COLORS } from '@/data/factions';
 import { calculateHitChance } from '@/store/helpers';
+import { ABILITY_TARGETING, ABILITY_MAX_USES, HIDDEN_ABILITIES, canUseAbility } from '@/store/abilities';
+import { ABILITIES } from '@/data/operatives';
+import { sfx } from '@/utils/sound';
 import Tooltip from '@/components/ui/Tooltip';
 import type { TileType } from '@/types';
 
@@ -54,8 +57,29 @@ export default function TacticalGrid() {
   const setPhase = useGameStore((s) => s.setPhase);
 
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
-  const [actionMode, setActionMode] = useState<'move' | 'attack' | null>(null);
+  const [actionMode, setActionMode] = useState<'move' | 'attack' | 'ability' | null>(null);
+  const [pendingAbility, setPendingAbility] = useState<string | null>(null);
   const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
+
+  // Keyboard shortcuts: Esc cancels action mode, E ends the turn
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setActionMode(null);
+        setPendingAbility(null);
+      } else if (e.key.toLowerCase() === 'e' && !e.repeat) {
+        const st = useGameStore.getState();
+        if (st.mission?.playerTurn && !st.mission.isComplete) {
+          st.endPlayerTurn();
+          setSelectedUnitId(null);
+          setActionMode(null);
+          setPendingAbility(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const accentColor = playerFaction ? FACTION_COLORS[playerFaction] : '#3B82F6';
 
@@ -119,37 +143,79 @@ export default function TacticalGrid() {
     for (const enemy of enemyUnits) {
       if (enemy.hp <= 0) continue;
       if (attackRange.has(`${enemy.position.x},${enemy.position.y}`)) {
-        map.set(enemy.id, calculateHitChance(selectedUnit, enemy, grid).hitPercent);
+        map.set(enemy.id, calculateHitChance(selectedUnit, enemy, grid, tacticalUnits).hitPercent);
       }
     }
     return map;
-  }, [selectedUnit, actionMode, enemyUnits, attackRange, grid]);
+  }, [selectedUnit, actionMode, enemyUnits, attackRange, grid, tacticalUnits]);
 
   // Full shot breakdown for the hovered target (transparency: why this %)
   const hoveredBreakdown = useMemo(() => {
     if (!selectedUnit || !hoveredTargetId || actionMode !== 'attack') return null;
     const target = tacticalUnits.find((u) => u.id === hoveredTargetId && u.hp > 0);
     if (!target || target.isPlayer) return null;
-    return { targetName: target.name, ...calculateHitChance(selectedUnit, target, grid) };
+    return { targetName: target.name, ...calculateHitChance(selectedUnit, target, grid, tacticalUnits) };
   }, [selectedUnit, hoveredTargetId, actionMode, tacticalUnits, grid]);
 
+  // Ability targeting range (purple tint)
+  const abilityRange = useMemo(() => {
+    if (!selectedUnit || actionMode !== 'ability' || !pendingAbility) return new Set<string>();
+    const def = ABILITIES[pendingAbility];
+    if (!def) return new Set<string>();
+    const range = def.range ?? 99;
+    const kind = ABILITY_TARGETING[pendingAbility] ?? 'self';
+    const set = new Set<string>();
+    for (let y = 0; y < grid.length; y++) {
+      for (let x = 0; x < (grid[0]?.length ?? 0); x++) {
+        const d = Math.abs(x - selectedUnit.position.x) + Math.abs(y - selectedUnit.position.y);
+        if (d > range) continue;
+        const unitHere = tacticalUnits.find((u) => u.hp > 0 && u.position.x === x && u.position.y === y);
+        if (kind === 'enemy' && unitHere && !unitHere.isPlayer) set.add(`${x},${y}`);
+        else if (kind === 'ally' && unitHere && unitHere.isPlayer && unitHere.id !== selectedUnit.id) set.add(`${x},${y}`);
+        else if (kind === 'tile' && grid[y]?.[x]?.type !== 'wall') set.add(`${x},${y}`);
+      }
+    }
+    return set;
+  }, [selectedUnit, actionMode, pendingAbility, grid, tacticalUnits]);
+
+  const activateAbility = useCallback((abilityId: string) => {
+    if (!selectedUnit) return;
+    const kind = ABILITY_TARGETING[abilityId] ?? 'self';
+    sfx.click();
+    if (kind === 'self') {
+      useGameStore.getState().useAbility(selectedUnit.id, abilityId);
+      setActionMode(null);
+      setPendingAbility(null);
+    } else {
+      setActionMode('ability');
+      setPendingAbility(abilityId);
+    }
+  }, [selectedUnit]);
+
   const handleTileClick = useCallback((x: number, y: number) => {
-    const store = useGameStore.getState() as any;
+    const store = useGameStore.getState();
 
     if (actionMode === 'move' && selectedUnit && moveRange.has(`${x},${y}`)) {
-      if (store.moveUnit) store.moveUnit(selectedUnitId, x, y);
+      store.moveUnit(selectedUnitId!, x, y);
       setActionMode(null);
       return;
     }
 
     if (actionMode === 'attack' && selectedUnit) {
       const target = tacticalUnits.find((u) => u.hp > 0 && u.position.x === x && u.position.y === y && !u.isPlayer);
-      if (target && store.attackUnit) {
-        store.attackUnit(selectedUnitId, target.id);
+      if (target) {
+        store.attackUnit(selectedUnitId!, target.id);
         setActionMode(null);
         setHoveredTargetId(null);
         return;
       }
+    }
+
+    if (actionMode === 'ability' && selectedUnit && pendingAbility && abilityRange.has(`${x},${y}`)) {
+      store.useAbility(selectedUnit.id, pendingAbility, x, y);
+      setActionMode(null);
+      setPendingAbility(null);
+      return;
     }
 
     // Select unit on tile
@@ -157,8 +223,9 @@ export default function TacticalGrid() {
     if (unitOnTile) {
       setSelectedUnitId(unitOnTile.id);
       setActionMode(null);
+      setPendingAbility(null);
     }
-  }, [actionMode, selectedUnit, selectedUnitId, moveRange, tacticalUnits]);
+  }, [actionMode, selectedUnit, selectedUnitId, moveRange, tacticalUnits, pendingAbility, abilityRange]);
 
   const handleEndTurn = useCallback(() => {
     const store = useGameStore.getState() as any;
@@ -226,6 +293,7 @@ export default function TacticalGrid() {
                 const unitHere = tacticalUnits.find((u) => u.hp > 0 && u.position.x === x && u.position.y === y);
                 const isInMoveRange = moveRange.has(key);
                 const isInAttackRange = attackRange.has(key);
+                const isInAbilityRange = abilityRange.has(key);
                 const isSelected = unitHere?.id === selectedUnitId;
                 const isObjective = tile.type === 'objective';
                 const hitChance = unitHere && !unitHere.isPlayer ? targetHitChances.get(unitHere.id) : undefined;
@@ -242,7 +310,9 @@ export default function TacticalGrid() {
                         ? '#1a2a4e'
                         : isInAttackRange
                           ? '#3e1a1a'
-                          : TILE_COLORS[tile.type],
+                          : isInAbilityRange
+                            ? '#2e1a4e'
+                            : TILE_COLORS[tile.type],
                       border: isSelected
                         ? `2px solid ${accentColor}`
                         : isObjective
@@ -379,7 +449,68 @@ export default function TacticalGrid() {
                   {selectedUnit.isCloaked && (
                     <span className="text-[9px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">CLOAKED</span>
                   )}
+                  {selectedUnit.statusEffects.map((se, i) => (
+                    <span key={i} className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase">
+                      {se.type} ({se.turnsRemaining}t)
+                    </span>
+                  ))}
                 </div>
+
+                {/* Abilities */}
+                {selectedUnit.isPlayer && selectedUnit.abilities.filter(a => !HIDDEN_ABILITIES.has(a)).length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-800">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-purple-400 mb-1.5">Abilities</p>
+                    <div className="space-y-1">
+                      {selectedUnit.abilities.filter(a => !HIDDEN_ABILITIES.has(a)).map((abilityId) => {
+                        const def = ABILITIES[abilityId];
+                        if (!def) return null;
+                        const usable = canUseAbility(selectedUnit, abilityId);
+                        const isActive = pendingAbility === abilityId && actionMode === 'ability';
+                        const usesLeft = abilityId in ABILITY_MAX_USES
+                          ? (selectedUnit.abilityUses?.[abilityId] ?? ABILITY_MAX_USES[abilityId])
+                          : null;
+                        return (
+                          <Tooltip
+                            key={abilityId}
+                            side="left"
+                            className="block w-full"
+                            content={
+                              <>
+                                <span className="block text-xs font-bold text-purple-300 mb-1">{def.name} ({def.apCost} AP)</span>
+                                <span className="block text-[11px] text-slate-400 leading-snug">{def.description}</span>
+                                <span className="block text-[10px] font-mono text-slate-500 mt-1">
+                                  {def.range ? `Range ${def.range} · ` : ''}{def.cooldown > 0 && def.cooldown < 90 ? `Cooldown ${def.cooldown}t` : usesLeft !== null ? `${usesLeft} use${usesLeft === 1 ? '' : 's'} left` : 'No cooldown'}
+                                </span>
+                                {!usable.ok && <span className="block text-[10px] text-red-400 mt-1">{usable.reason}</span>}
+                              </>
+                            }
+                          >
+                            <button
+                              onClick={() => usable.ok && activateAbility(abilityId)}
+                              disabled={!usable.ok || !mission.playerTurn}
+                              className={`w-full text-left text-[10px] px-2 py-1 rounded flex justify-between items-center transition-colors ${
+                                isActive
+                                  ? 'bg-purple-600 text-white'
+                                  : usable.ok
+                                    ? 'bg-purple-500/10 text-purple-300 hover:bg-purple-500/25'
+                                    : 'bg-slate-800/50 text-slate-600 cursor-not-allowed'
+                              }`}
+                            >
+                              <span>{def.name}</span>
+                              <span className="font-mono opacity-70">
+                                {(selectedUnit.abilityCooldowns?.[abilityId] ?? 0) > 0
+                                  ? `CD ${selectedUnit.abilityCooldowns?.[abilityId]}`
+                                  : usesLeft !== null
+                                    ? `×${usesLeft}`
+                                    : `${def.apCost}AP`}
+                              </span>
+                            </button>
+                          </Tooltip>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-[10px] text-slate-600 italic">Click a unit to select</p>
@@ -547,10 +678,12 @@ export default function TacticalGrid() {
             {!selectedUnit
               ? 'Click one of your blue units to select it'
               : actionMode === 'move'
-                ? 'Click a highlighted blue tile to move'
+                ? 'Click a highlighted blue tile to move (Esc to cancel)'
                 : actionMode === 'attack'
                   ? 'Click a red target — the badge shows your hit chance'
-                  : `${selectedUnit.name}: ${selectedUnit.actionsRemaining} AP remaining`}
+                  : actionMode === 'ability' && pendingAbility
+                    ? `${ABILITIES[pendingAbility]?.name}: click a purple-highlighted target (Esc to cancel)`
+                    : `${selectedUnit.name}: ${selectedUnit.actionsRemaining} AP remaining · E ends turn`}
           </span>
         </div>
 

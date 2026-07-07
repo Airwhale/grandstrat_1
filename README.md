@@ -17,8 +17,13 @@ Open [http://localhost:3000](http://localhost:3000). Best on a desktop screen (1
 
 ### Goal
 
-- **Win** by controlling **30 of 46 territories** (progress shown in the top bar).
-- **Lose** if you run out of territories — or out of operatives.
+Three paths to victory:
+
+- **Domination** — control 30 of 46 territories (progress in the top bar).
+- **Economic** — amass a 10,000-credit reserve.
+- **Diplomatic** — hold alliances with 3+ factions while controlling 15+ territories for 12 consecutive turns.
+
+**Lose** if you run out of territories, or your roster and treasury both hit zero. And beware: if you pull ahead of every rival, they **form a coalition against you** — watch the relations web turn red.
 
 ### Pick a Faction
 
@@ -51,14 +56,22 @@ Press **END TURN** and the world moves: income arrives, AI factions maneuver and
 
 ### Tactical Combat
 
-Covert Ops drop your **5 best active operatives** onto a terrain-based grid (urban, jungle, desert, arctic, mountain, coastal):
+Covert Ops drop your **5 best active operatives** onto a terrain-based grid (urban, jungle, desert, arctic, mountain, coastal). Three mission types:
 
-- Each unit gets **2 action points**: move, attack, **Overwatch** (reaction fire), or **Hunker** (double cover).
-- Attack mode shows a **hit % badge** over each target — hover for the full breakdown (aim, range, cover, flanking, high ground).
-- Half cover: -20% to be hit. Full cover: -40%. Flanking negates cover and adds crit chance.
+- **Assault** — eliminate all hostiles.
+- **Extraction** — get any operative to the gold extraction tile before the window closes (10 turns).
+- **Defense** — hold out for 6 turns against reinforcement waves.
+
+Combat rules:
+
+- Each unit gets **2 action points**: move, attack, **Overwatch** (reaction fire at moving enemies), or **Hunker** (double cover).
+- **Class abilities** (purple buttons in the unit panel): Medics heal, Heavies fire rockets that destroy cover, Infiltrators cloak, Sharpshooters headshot, Specialists hack, and each faction's unique unit has its signature power (Spetsnaz breach charges, Silk Agent conversions, Ghost Broker bribes...). Abilities have AP costs, cooldowns, and limited uses — hover for details.
+- Attack mode shows a **hit % badge** over each target — hover for the full breakdown (aim, range, cover, flanking, high ground, status effects, bonds).
+- Half cover: -20% to be hit. Full cover: -40%. Flanking negates cover and adds crit chance. Attacking from cloak is a guaranteed crit.
 - **Blue units are yours. Red are hostile.**
 - An operative at 0 HP is **KIA — gone forever**, their name added to the memorial wall (top bar → **ROSTER**).
-- Survivors earn XP, level up, and get wounded (1–3 turns out) if they took damage.
+- Survivors earn XP, level up, get wounded (1–3 turns out) if hurt — and squadmates who win together can form **battle bonds** (+5 aim when adjacent).
+- Shortcuts: **Esc** cancels targeting, **E** ends the turn.
 
 ### Resources
 

@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { FACTION_COLORS } from '@/data/factions';
 import HelpModal from '@/components/ui/HelpModal';
+import { isMuted, setMuted, sfx } from '@/utils/sound';
 
 export default function TopBar() {
   const {
@@ -17,11 +18,15 @@ export default function TopBar() {
     loadGame,
     getSaves,
     setPhase,
+    difficulty,
   } = useGameStore();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [muted, setMutedState] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setMutedState(isMuted()); }, []);
 
   const playerData = playerFaction ? factions[playerFaction] : null;
   const resources = playerData?.resources;
@@ -29,6 +34,8 @@ export default function TopBar() {
   const territoryCount = playerData?.territories.length ?? 0;
 
   const actionsRemaining = useGameStore((s) => s.actionsRemaining) ?? 5;
+  const incomeBreakdown = useGameStore((s) => s.incomeBreakdown);
+  const isIronman = difficulty === 'ironman';
 
   // Close menu on outside click
   useEffect(() => {
@@ -112,15 +119,26 @@ export default function TopBar() {
             <div
               key={key}
               className="flex items-center gap-1 group relative"
-              title={label}
             >
               <span className="text-sm">{icon}</span>
               <span className="font-mono text-white text-sm font-semibold">
                 {resources[key as keyof typeof resources]}
               </span>
-              {/* Tooltip */}
-              <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 bg-gray-900 text-gray-300 text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-gray-700 z-50">
-                {label}
+              {/* Tooltip — credits shows the income ledger */}
+              <span className="absolute top-7 left-1/2 -translate-x-1/2 bg-gray-900 text-gray-300 text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-gray-700 z-50">
+                {key === 'credits' && incomeBreakdown ? (
+                  <span className="block text-left space-y-0.5">
+                    <span className="block font-bold text-slate-200 mb-0.5">Income last turn</span>
+                    <span className="block">Territories <span className="text-green-400 font-mono">+{incomeBreakdown.territories}</span></span>
+                    <span className="block">Buildings <span className="text-green-400 font-mono">+{incomeBreakdown.buildings}</span></span>
+                    {incomeBreakdown.unrestPenalty !== 0 && (
+                      <span className="block">Unrest <span className="text-red-400 font-mono">{incomeBreakdown.unrestPenalty}</span></span>
+                    )}
+                    <span className="block border-t border-gray-700 pt-0.5 mt-0.5">Total <span className="text-yellow-400 font-mono">+{incomeBreakdown.total}/turn</span></span>
+                  </span>
+                ) : (
+                  label
+                )}
               </span>
             </div>
           ))}
@@ -143,6 +161,18 @@ export default function TopBar() {
             className="text-[11px] uppercase tracking-wider px-2.5 py-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
           >
             Tech
+          </button>
+          <button
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              setMutedState(next);
+              if (!next) sfx.confirm();
+            }}
+            title={muted ? 'Unmute sound' : 'Mute sound'}
+            className="text-[13px] px-2 py-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          >
+            {muted ? '🔇' : '🔊'}
           </button>
           <button
             onClick={() => setHelpOpen(true)}
@@ -254,8 +284,17 @@ export default function TopBar() {
                   </div>
                 </div>
 
+                {/* Ironman notice */}
+                {isIronman && (
+                  <div className="px-4 py-2 border-b border-gray-700 bg-red-950/30">
+                    <span className="text-[10px] text-red-400 uppercase tracking-wider font-bold">
+                      Ironman — autosave only. No manual saves. No take-backs.
+                    </span>
+                  </div>
+                )}
+
                 {/* Save Slots 1-3 */}
-                {[1, 2, 3].map((slotId) => {
+                {!isIronman && [1, 2, 3].map((slotId) => {
                   const slot = saves.find((s) => s.id === slotId);
                   return (
                     <div

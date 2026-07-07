@@ -148,6 +148,7 @@ export function setupTacticalCombat(
   playerFaction: FactionId,
   roster: Operative[],
   defenderTroops: number,
+  missionType: 'assault' | 'extraction' | 'defense' = 'assault',
 ): { grid: Tile[][]; units: TacticalUnit[]; mission: Mission } {
   const mapData = generateCombatMap(terrain);
   const gridHeight = mapData.length;
@@ -202,6 +203,9 @@ export function setupTacticalCombat(
           abilities: op.abilities,
           weaponDamage: CLASS_WEAPON_DMG[op.class] ?? 4,
           kills: 0,
+          abilityCooldowns: {},
+          abilityUses: {},
+          bondedWith: op.bondedWith ?? undefined,
         });
         placed++;
       }
@@ -245,20 +249,53 @@ export function setupTacticalCombat(
 
   const allUnits = [...playerUnits, ...enemyUnits];
 
-  const mission: Mission = {
-    type: 'assault',
-    territoryId: '',
-    terrain,
-    gridWidth,
-    gridHeight,
-    objectives: [{
+  // Locate the map's objective tile (every template has one)
+  let objectiveTile = { x: gridWidth - 2, y: gridHeight - 2 };
+  for (const row of grid) {
+    for (const tile of row) {
+      if (tile.type === 'objective') objectiveTile = { x: tile.x, y: tile.y };
+    }
+  }
+
+  let objectives: Mission['objectives'];
+  let turnLimit: number | null = 20;
+  if (missionType === 'extraction') {
+    objectives = [{
+      id: 'obj_reach',
+      description: 'Reach the extraction zone (gold tile)',
+      type: 'reach',
+      targetPosition: objectiveTile,
+      isComplete: false,
+    }];
+    turnLimit = 10;
+  } else if (missionType === 'defense') {
+    objectives = [{
+      id: 'obj_survive',
+      description: 'Survive 6 turns — reinforcements incoming',
+      type: 'survive',
+      turnsRequired: 6,
+      turnsHeld: 0,
+      isComplete: false,
+    }];
+    turnLimit = null;
+  } else {
+    objectives = [{
       id: 'obj_eliminate',
       description: 'Eliminate all hostiles',
       type: 'eliminate',
       isComplete: false,
-    }],
+    }];
+  }
+
+  const mission: Mission = {
+    type: missionType,
+    territoryId: '',
+    terrain,
+    gridWidth,
+    gridHeight,
+    objectives,
     enemyCount,
-    turnLimit: 20,
+    turnLimit,
     currentTurn: 1,
     playerTurn: true,
     isComplete: false,
@@ -268,11 +305,45 @@ export function setupTacticalCombat(
   return { grid, units: allUnits, mission };
 }
 
+// ---- Defense mission reinforcement wave ----
+let waveCounter = 0;
+export function spawnEnemyWave(units: TacticalUnit[], grid: Tile[][], count: number): { units: TacticalUnit[]; spawned: number } {
+  const gridWidth = grid[0]?.length ?? 12;
+  const newUnits = [...units];
+  let spawned = 0;
+  for (let i = 0; i < count * 3 && spawned < count; i++) {
+    const x = Math.floor(Math.random() * gridWidth);
+    const y = grid.length - 1 - Math.floor(Math.random() * 2);
+    const tile = grid[y]?.[x];
+    const occupied = newUnits.some(u => u.hp > 0 && u.position.x === x && u.position.y === y);
+    if (tile && tile.type !== 'wall' && tile.type !== 'water' && !occupied) {
+      waveCounter++;
+      newUnits.push({
+        id: `wave_${waveCounter}`,
+        name: `Reinforcement ${waveCounter}`,
+        isPlayer: false,
+        class: 'militia',
+        hp: 6, maxHp: 6, armor: 0, aim: 3, mobility: 4,
+        position: { x, y },
+        actionsRemaining: 0, maxActions: 2,
+        isInOverwatch: false, isHunkered: false, isCloaked: false,
+        statusEffects: [],
+        behaviorProfile: 'aggressive',
+        abilities: [],
+        weaponDamage: 3,
+      });
+      spawned++;
+    }
+  }
+  return { units: newUnits, spawned };
+}
+
 // ---- Hit Chance Calculation ----
 export function calculateHitChance(
   attacker: TacticalUnit,
   target: TacticalUnit,
   grid: Tile[][],
+  allUnitsForBond?: TacticalUnit[],
 ): { hitPercent: number; critPercent: number; breakdown: string[] } {
   const breakdown: string[] = [];
   let hit = 65;
@@ -316,6 +387,24 @@ export function calculateHitChance(
   // For simplicity, flanking if distance is close and adjacent
   if (dist <= 2) { hit += 15; breakdown.push('Flanking: +15%'); }
 
+  // Status effects
+  for (const se of attacker.statusEffects) {
+    if (se.type === 'suppressed') { hit += se.value; breakdown.push(`Suppressed: ${se.value}%`); }
+    if (se.type === 'stim') { hit += se.value; breakdown.push(`Combat stim: +${se.value}%`); }
+  }
+  for (const se of target.statusEffects) {
+    if (se.type === 'smoke') { hit += se.value; breakdown.push(`Target in smoke: ${se.value}%`); }
+  }
+
+  // Bond: +5 aim if a bonded battle-partner stands adjacent
+  if (attacker.bondedWith) {
+    const partnerAdjacent = allUnitsForBond?.some(u =>
+      u.hp > 0 && u.operativeId === attacker.bondedWith &&
+      Math.abs(u.position.x - attacker.position.x) + Math.abs(u.position.y - attacker.position.y) <= 1
+    );
+    if (partnerAdjacent) { hit += 5; breakdown.push('Bonded partner adjacent: +5%'); }
+  }
+
   const hitPercent = Math.max(5, Math.min(95, hit));
   const critPercent = Math.max(0, 5 + (dist <= 2 ? 15 : 0));
 
@@ -328,19 +417,48 @@ export function processEnemyAI(
   grid: Tile[][],
 ): { units: TacticalUnit[]; log: CombatLogEntry[]; turn: number } {
   const log: CombatLogEntry[] = [];
-  const updatedUnits = units.map(u => ({ ...u }));
+  const updatedUnits = units.map(u => ({ ...u, statusEffects: [...u.statusEffects] }));
+
+  // Round boundary: tick status effects and ability cooldowns for everyone
+  for (const u of updatedUnits) {
+    u.statusEffects = u.statusEffects
+      .map(se => ({ ...se, turnsRemaining: se.turnsRemaining - 1 }))
+      .filter(se => se.turnsRemaining > 0);
+    if (u.isCloaked && !u.statusEffects.some(se => se.type === 'cloak')) u.isCloaked = false;
+    if (u.abilityCooldowns) {
+      const cds: Record<string, number> = {};
+      for (const [k, v] of Object.entries(u.abilityCooldowns)) {
+        if (v > 1) cds[k] = v - 1;
+      }
+      u.abilityCooldowns = cds;
+    }
+  }
+
   const enemies = updatedUnits.filter(u => !u.isPlayer && u.hp > 0);
   const players = updatedUnits.filter(u => u.isPlayer && u.hp > 0);
 
   for (const enemy of enemies) {
     enemy.actionsRemaining = enemy.maxActions;
 
+    // Stunned enemies lose their turn
+    if (enemy.statusEffects.some(se => se.type === 'stunned')) {
+      log.push({ turn: 0, message: `${enemy.name} is disabled`, type: 'system' });
+      continue;
+    }
+
+    // Cloaked operatives can't be targeted
+    const visiblePlayers = players.filter(p => !p.isCloaked);
+    if (visiblePlayers.length === 0) {
+      log.push({ turn: 0, message: `${enemy.name} searches for hidden targets`, type: 'movement' });
+      continue;
+    }
+
     if (players.length === 0) break;
 
     // Find closest player
     let closestPlayer: TacticalUnit | null = null;
     let closestDist = Infinity;
-    for (const p of players) {
+    for (const p of visiblePlayers) {
       const d = Math.abs(p.position.x - enemy.position.x) + Math.abs(p.position.y - enemy.position.y);
       if (d < closestDist) { closestDist = d; closestPlayer = p; }
     }
